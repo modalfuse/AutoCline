@@ -81,18 +81,6 @@ export function AgentApprovalCard({
 			) : null}
 			<div className="cline-ui-agent-approval-card__actions">
 				<Button
-					tone="neutral"
-					className="cline-ui-agent-approval-card__button cline-ui-agent-approval-card__button--approve"
-					disabled={isPending}
-					leadingIcon={responding === "approve" ? Spinner : undefined}
-					onClick={onApprove}
-					size="sm"
-					type="button"
-					variant="primary"
-				>
-					{responding === "approve" ? "Approving..." : "Approve"}
-				</Button>
-				<Button
 					className="cline-ui-agent-approval-card__button cline-ui-agent-approval-card__button--reject"
 					disabled={isPending}
 					leadingIcon={responding === "reject" ? Spinner : undefined}
@@ -103,6 +91,18 @@ export function AgentApprovalCard({
 					variant="secondary"
 				>
 					{responding === "reject" ? "Rejecting..." : "Reject"}
+				</Button>
+				<Button
+					tone="neutral"
+					className="cline-ui-agent-approval-card__button cline-ui-agent-approval-card__button--approve"
+					disabled={isPending}
+					leadingIcon={responding === "approve" ? Spinner : undefined}
+					onClick={onApprove}
+					size="sm"
+					type="button"
+					variant="primary"
+				>
+					{responding === "approve" ? "Approving..." : "Approve"}
 				</Button>
 			</div>
 		</section>
