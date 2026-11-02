@@ -58,7 +58,6 @@ export function AgentChangesPanel({
 						className="cline-ui-agent-changes__count font-cline-ui-mono"
 						size="xxs"
 						tone="neutral"
-						variant="ghost"
 					>
 						Files: {fileCount}
 					</Badge>
