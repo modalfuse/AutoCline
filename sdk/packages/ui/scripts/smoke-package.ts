@@ -347,7 +347,7 @@ async function verifyTailwindContract(
 		"leading-none",
 		"max-h-44",
 		"not-last:border-b",
-		"focus-visible:outline-3",
+		"focus-visible:outline-2",
 		"min-h-8",
 		"resize-none",
 		"backdrop-blur-sm",
@@ -383,7 +383,7 @@ async function verifyTailwindContract(
 		"border-style:solid",
 		"font-family:inherit",
 		"margin:.5rem 0 0",
-		"padding-block:0",
+		"padding:0",
 	]) {
 		expectFragment(noPreflightCss, fragment, "no-Preflight Tailwind contract");
 	}
