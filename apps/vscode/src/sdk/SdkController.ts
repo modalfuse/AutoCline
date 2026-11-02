@@ -1050,10 +1050,7 @@ export class Controller {
 	}
 
 	async dispose(): Promise<void> {
-		this.cloudHandoff.reset()
-		const handoffCloud = this.handoffCloud
-		this.handoffCloud = undefined
-		await handoffCloud?.dispose()
+		await this.resetCloudHandoff()
 		this.providerConfigStoreSubscription.dispose()
 		// Clear the remote config timer to prevent stale fetches
 		if (this.remoteConfigTimer) {
@@ -1678,6 +1675,13 @@ export class Controller {
 		return userId ? `${userId}:${this.authService.getActiveOrganizationId() ?? ""}` : undefined
 	}
 
+	private async resetCloudHandoff(): Promise<void> {
+		this.cloudHandoff.reset()
+		const cloud = this.handoffCloud
+		this.handoffCloud = undefined
+		await cloud?.dispose()
+	}
+
 	private getHandoffAccount() {
 		if (this.handoffAccountChanges > 0) return undefined
 		const user = this.authService.getInfo().user
@@ -1687,12 +1691,9 @@ export class Controller {
 		if (!user?.uid || !key) return undefined
 		if (this.handoffAccountKey !== key) {
 			this.handoffAccountKey = key
-			const cloud = this.handoffCloud
-			this.handoffCloud = undefined
-			this.cloudHandoff.reset()
-			void cloud
-				?.dispose()
-				.catch((error) => Logger.error("[SdkController] Failed to dispose previous cloud handoff", error))
+			void this.resetCloudHandoff().catch((error) =>
+				Logger.error("[SdkController] Failed to dispose previous cloud handoff", error),
+			)
 		}
 		const org = organizations.find((organization) => organization.active)
 		return {
@@ -1800,11 +1801,10 @@ export class Controller {
 			const host = session?.sdkHost ?? (await this.createRemoteConfigAwareSessionHost())
 			try {
 				const record = await host.get(sourceTaskId)
-				const history = await this.taskHistory.findHistoryItem(sourceTaskId)
 				const cwd =
 					record?.cwd?.trim() ||
 					record?.workspaceRoot?.trim() ||
-					history?.cwdOnTaskInitialization?.trim() ||
+					(await this.taskHistory.findHistoryItem(sourceTaskId))?.cwdOnTaskInitialization?.trim() ||
 					(await this.getWorkspaceRoot())
 				const mode = session?.mode ?? (this.stateManager.getGlobalSettingsKey("mode") === "plan" ? "plan" : "act")
 				const config = await this.sessionConfigBuilder.build({ cwd, mode })
@@ -2442,11 +2442,8 @@ export class Controller {
 
 	private async changeHandoffAccount(change: () => Promise<void>): Promise<void> {
 		this.handoffAccountChanges++
-		this.cloudHandoff.reset()
-		const cloud = this.handoffCloud
-		this.handoffCloud = undefined
 		try {
-			await cloud?.dispose()
+			await this.resetCloudHandoff()
 			await change()
 		} finally {
 			this.handoffAccountChanges--

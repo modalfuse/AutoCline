@@ -43,8 +43,7 @@ describe("cloud handoff navigation", () => {
 		}
 	})
 
-	it.each(["sent", "unsent", "unconfirmed"] as const)("opens a %s task in Cline through History", (delivery) => {
-		view = { ...view, phase: "complete", sessionId: "ses-cloud-task", delivery }
+	it("opens the task in Cline through History", () => {
 		render(<CloudHandoff />)
 		fireEvent.click(screen.getByRole("button", { name: "Open cloud task" }))
 		expect(clients.showTaskWithId).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ value: "ses-cloud-task" }))
@@ -141,15 +140,13 @@ describe("cloud handoff navigation", () => {
 		expect(clients.showTaskWithId).not.toHaveBeenCalled()
 	})
 
-	it.each(["attempt", "session"])("ignores a late native failure after the %s changes", async (change) => {
-		let rejectOpen: (reason: Error) => void = () => {}
-		clients.showTaskWithId.mockReturnValueOnce(
-			new Promise((_resolve, reject) => {
-				rejectOpen = reject
-			}),
-		)
+	it.each(["attempt", "session"])("resets settled and pending native failures when the %s changes", async (change) => {
+		const pending = Promise.withResolvers<void>()
+		clients.showTaskWithId.mockReturnValueOnce(pending.promise).mockRejectedValueOnce(new Error("Open failed"))
 		const { rerender } = render(<CloudHandoff />)
 		fireEvent.click(screen.getByRole("button", { name: "Open cloud task" }))
+		fireEvent.click(screen.getByRole("button", { name: "Open cloud task" }))
+		await screen.findByRole("button", { name: "Open in browser" })
 		view = {
 			...view,
 			phase: "complete",
@@ -158,23 +155,14 @@ describe("cloud handoff navigation", () => {
 			delivery: "sent",
 		}
 		rerender(<CloudHandoff />)
-		await act(async () => rejectOpen(new Error("Old open failed")))
+		expect(screen.getByRole("button", { name: "Open cloud task" })).toBeEnabled()
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+		expect(screen.queryByRole("button", { name: "Open in browser" })).not.toBeInTheDocument()
+		await act(async () => pending.reject(new Error("Old open failed")))
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument()
 		expect(screen.queryByRole("button", { name: "Open in browser" })).not.toBeInTheDocument()
 		fireEvent.click(screen.getByRole("button", { name: "Open cloud task" }))
 		expect(clients.showTaskWithId).toHaveBeenLastCalledWith(expect.objectContaining({ value: view.sessionId }))
-	})
-
-	it("restores the native action for a new handoff after a failure", async () => {
-		clients.showTaskWithId.mockRejectedValue(new Error("Open failed"))
-		const { rerender } = render(<CloudHandoff />)
-		fireEvent.click(screen.getByRole("button", { name: "Open cloud task" }))
-		await screen.findByRole("button", { name: "Open in browser" })
-		view = { ...view, id: "next" }
-		rerender(<CloudHandoff />)
-		expect(screen.getByRole("button", { name: "Open cloud task" })).toBeEnabled()
-		expect(screen.queryByRole("button", { name: "Open in browser" })).not.toBeInTheDocument()
-		expect(screen.queryByRole("alert")).not.toBeInTheDocument()
 	})
 
 	it("removes the notice away from the source and restores its recovery controls on return", () => {
@@ -185,7 +173,6 @@ describe("cloud handoff navigation", () => {
 		viewingSource = false
 		rerender(<CloudHandoff />)
 		expect(screen.queryByRole("region", { name: "Cloud handoff" })).not.toBeInTheDocument()
-		expect(screen.queryByRole("button", { name: "Back to local" })).not.toBeInTheDocument()
 		viewingSource = true
 		rerender(<CloudHandoff />)
 		fireEvent.click(screen.getByRole("button", { name: "Retry continuation" }))

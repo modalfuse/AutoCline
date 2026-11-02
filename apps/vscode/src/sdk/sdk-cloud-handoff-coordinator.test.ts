@@ -92,6 +92,18 @@ function setup() {
 	}
 }
 
+async function setupUnsentContinuation() {
+	const context = setup()
+	publish.mockResolvedValue({
+		sessionId: "ses_example",
+		status: "idle",
+		initialSend: { dispatched: false, message: "unavailable" },
+	})
+	await context.coordinator.prepare(input)
+	await context.coordinator.confirm(context.id())
+	return context
+}
+
 describe("cloud conversation handoff", () => {
 	it("keeps the handoff notice on its source when viewing the cloud task", async () => {
 		const { coordinator, id, switchAccount } = setup()
@@ -199,14 +211,12 @@ describe("cloud conversation handoff", () => {
 
 	it.each([
 		[
-			new Error(new CloudSessionError("github_not_connected", "Connect GitHub before handing off.").message),
+			new CloudSessionError("github_not_connected", "Connect GitHub before handing off."),
 			"Connect GitHub before handing off.",
 			"connect_github",
 		],
-		[new Error("CLOUD_SESSION_ERROR:not-json"), "CLOUD_SESSION_ERROR:not-json", undefined],
-		[new Error('CLOUD_SESSION_ERROR:{"message":42}'), 'CLOUD_SESSION_ERROR:{"message":42}', undefined],
 		[new Error("Network unavailable"), "Network unavailable", undefined],
-		[new Error(new CloudSessionError("request_failed", "Request unavailable.").message), "Request unavailable.", undefined],
+		[new CloudSessionError("request_failed", "Request unavailable."), "Request unavailable.", undefined],
 		[new Error(""), "Unable to prepare cloud handoff.", undefined],
 	])("shows a readable preparation error for %s", async (error, message, recovery) => {
 		const { coordinator, cloud } = setup()
@@ -218,7 +228,7 @@ describe("cloud conversation handoff", () => {
 
 	it("keeps GitHub recovery and the ambiguity warning when publication fails", async () => {
 		const { coordinator, id } = setup()
-		publish.mockRejectedValue(new Error(new CloudSessionError("github_not_connected", "Grant repository access.").message))
+		publish.mockRejectedValue(new CloudSessionError("github_not_connected", "Grant repository access."))
 		await coordinator.prepare(input)
 		await coordinator.confirm(id())
 		expect(coordinator.viewFor(input.sourceTaskId)).toMatchObject({
@@ -323,14 +333,7 @@ describe("cloud conversation handoff", () => {
 		"error",
 		"draining",
 	])("retries only the unsent continuation in the existing task (%s)", async (outcome) => {
-		const { coordinator, cloud, id } = setup()
-		publish.mockResolvedValue({
-			sessionId: "ses_example",
-			status: "idle",
-			initialSend: { dispatched: false, message: "unavailable" },
-		})
-		await coordinator.prepare(input)
-		await coordinator.confirm(id())
+		const { coordinator, cloud, id } = await setupUnsentContinuation()
 		if (outcome === "error") cloud.send.mockRejectedValueOnce(new Error("connection closed"))
 		else if (outcome === "draining")
 			cloud.send.mockRejectedValueOnce(
@@ -364,14 +367,7 @@ describe("cloud conversation handoff", () => {
 	})
 
 	it("keeps an unsent continuation through discard until it can be retried", async () => {
-		const { coordinator, cloud, id } = setup()
-		publish.mockResolvedValue({
-			sessionId: "ses_example",
-			status: "idle",
-			initialSend: { dispatched: false, message: "unavailable" },
-		})
-		await coordinator.prepare(input)
-		await coordinator.confirm(id())
+		const { coordinator, cloud, id } = await setupUnsentContinuation()
 		const handoffId = id()
 		await coordinator.discard(handoffId)
 		expect(coordinator.viewFor(input.sourceTaskId)).toMatchObject({ id: handoffId, delivery: "unsent" })
@@ -389,14 +385,7 @@ describe("cloud conversation handoff", () => {
 	})
 
 	it("keeps a safe retry when state publication fails before sending", async () => {
-		const { coordinator, cloud, changed, id } = setup()
-		publish.mockResolvedValue({
-			sessionId: "ses_example",
-			status: "idle",
-			initialSend: { dispatched: false, message: "unavailable" },
-		})
-		await coordinator.prepare(input)
-		await coordinator.confirm(id())
+		const { coordinator, cloud, changed, id } = await setupUnsentContinuation()
 		changed.mockRejectedValueOnce(new Error("Webview unavailable"))
 		await expect(coordinator.retryMessage(id())).rejects.toThrow("Webview unavailable")
 		expect(cloud.send).not.toHaveBeenCalled()
@@ -421,14 +410,7 @@ describe("cloud conversation handoff", () => {
 	})
 
 	it("does not retry a continuation after account reset during state publication", async () => {
-		const { coordinator, cloud, changed, id } = setup()
-		publish.mockResolvedValue({
-			sessionId: "ses_example",
-			status: "idle",
-			initialSend: { dispatched: false, message: "unavailable" },
-		})
-		await coordinator.prepare(input)
-		await coordinator.confirm(id())
+		const { coordinator, cloud, changed, id } = await setupUnsentContinuation()
 		changed.mockImplementationOnce(async () => coordinator.reset())
 		await expect(coordinator.retryMessage(id())).rejects.toThrow("account or preparation changed")
 		expect(cloud.send).not.toHaveBeenCalled()

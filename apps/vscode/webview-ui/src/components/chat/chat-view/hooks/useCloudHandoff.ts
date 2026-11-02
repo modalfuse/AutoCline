@@ -34,7 +34,6 @@ export function useCloudHandoff(chatState: ChatState) {
 			if (submitted.attemptId && !submitted.cleared) removeDraft(sourceTaskId, submitted)
 			return
 		}
-		if (cloudHandoff.sourceTaskId !== sourceTaskId) return
 		if ((cloudHandoff.phase === "preparing" || cloudHandoff.phase === "ready") && !submitted.attemptId) {
 			setDrafts((current) => new Map(current).set(sourceTaskId, { ...submitted, attemptId: cloudHandoff.id }))
 			return
@@ -96,7 +95,6 @@ export function useCloudHandoff(chatState: ChatState) {
 		submitted?.cleared &&
 		(!cloudHandoff ||
 			(cloudHandoff.id === submitted.attemptId &&
-				cloudHandoff.sourceTaskId === sourceTaskId &&
 				(cloudHandoff.phase === "failed" ||
 					(cloudHandoff.phase === "complete" && cloudHandoff.delivery === "unconfirmed"))))
 	const restoreDraft =

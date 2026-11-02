@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { type CoreSessionConfig, RuntimeOAuthTokenManager, summarizeConversation } from "@cline/core"
 import {
 	type CloudSessionController,
+	CloudSessionError,
 	type HandoffGitPlan,
 	type PublishedHandoffInput,
 	previewHandoffGit,
@@ -9,28 +10,19 @@ import {
 } from "@cline/core/cloud"
 import { createMediaBudgetState, validateAndReserveImageMedia } from "@cline/shared"
 import type { CloudHandoffView } from "@shared/cloud/cloud-handoff"
-import { z } from "zod"
 import { getProviderSettingsManager } from "./provider-migration"
-
-const cloudErrorDetail = z.object({ message: z.string().trim().min(1), code: z.string().optional() })
 
 function handoffError(
 	error: unknown,
 	fallback: string,
 ): Pick<Extract<CloudHandoffView, { phase: "failed" }>, "message" | "recovery"> {
-	const message = error instanceof Error ? error.message.trim() : ""
-	const prefix = "CLOUD_SESSION_ERROR:"
-	if (message.startsWith(prefix)) {
-		try {
-			const parsed = cloudErrorDetail.safeParse(JSON.parse(message.slice(prefix.length)))
-			if (parsed.success) {
-				if (parsed.data.code === "github_not_connected")
-					return { message: parsed.data.message, recovery: "connect_github" }
-				return { message: parsed.data.message }
-			}
-		} catch {}
+	if (error instanceof CloudSessionError) {
+		return {
+			message: error.detail,
+			recovery: error.code === "github_not_connected" ? "connect_github" : undefined,
+		}
 	}
-	return { message: message || fallback }
+	return { message: error instanceof Error ? error.message.trim() || fallback : fallback }
 }
 
 export interface CapturedHandoffSource {

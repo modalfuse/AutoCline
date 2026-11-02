@@ -162,6 +162,7 @@ describe("SDK remote-config coordination", () => {
 			},
 			cloud: { reset: async (change: () => Promise<void>) => change() },
 			changeHandoffAccount: SdkController.prototype["changeHandoffAccount"],
+			resetCloudHandoff: SdkController.prototype["resetCloudHandoff"],
 			refreshRemoteConfig: vi.fn(async () => {
 				events.push("refresh")
 				return true
@@ -918,10 +919,10 @@ describe("cloud tasks stay in the cloud", () => {
 describe("cloud handoff source capture", () => {
 	afterEach(() => vi.restoreAllMocks())
 
-	function setup(active = true) {
+	function setup(active = true, record: { cwd?: string; workspaceRoot?: string } = { cwd: "/workspace" }) {
 		const messages = [{ role: "user" as const, content: "Finish the widget" }]
 		const host = {
-			get: vi.fn(async () => ({ cwd: "/workspace" })),
+			get: vi.fn(async () => record),
 			readLiveMessages: vi.fn(async () => messages),
 			readMessages: vi.fn(async () => []),
 			dispose: vi.fn(async () => {}),
@@ -944,7 +945,7 @@ describe("cloud handoff source capture", () => {
 			backgroundCommandRunning: false,
 			foregroundCommands: { isRunning: false },
 			createRemoteConfigAwareSessionHost: vi.fn(async () => host),
-			taskHistory: { findHistoryItem: async () => undefined },
+			taskHistory: { findHistoryItem: vi.fn(async () => ({ cwdOnTaskInitialization: "/legacy" })) },
 			stateManager: { getGlobalSettingsKey: () => "act" },
 			sessionConfigBuilder: { build: async () => session.startConfig },
 			sessionHistory: { loadInitialMessages: vi.fn(async () => messages) },
@@ -971,13 +972,17 @@ describe("cloud handoff source capture", () => {
 		return { controller, session, host, messages, inspect, capture }
 	}
 
-	it("copies the live transcript without changing or disposing the local session", async () => {
-		const { capture, host, messages, inspect } = setup()
+	it.each([
+		{ cwd: "/workspace" },
+		{ workspaceRoot: "/workspace" },
+	])("copies the live transcript using its saved location %j", async (record) => {
+		const { capture, host, messages, inspect, controller } = setup(true, record)
 		const snapshot = await capture()
 		messages[0].content = "Later local edit"
 		expect(snapshot.messages[0].content).toBe("Finish the widget")
 		expect(host.readMessages).not.toHaveBeenCalled()
 		expect(host.dispose).not.toHaveBeenCalled()
+		expect(controller.taskHistory.findHistoryItem).not.toHaveBeenCalled()
 		expect(inspect).toHaveBeenCalledWith("/workspace", expect.any(Function))
 	})
 
@@ -1021,11 +1026,12 @@ describe("cloud handoff source capture", () => {
 	})
 
 	it("reads a saved conversation without activating it and disposes its temporary host", async () => {
-		const { controller, host, capture } = setup(false)
+		const { controller, host, capture, inspect } = setup(false, {})
 		expect((await capture()).messages).toEqual([{ role: "user", content: "Finish the widget" }])
 		expect(controller.sessionHistory.loadInitialMessages).toHaveBeenCalledWith(host, "local-task")
 		expect(host.readLiveMessages).not.toHaveBeenCalled()
 		expect(host.dispose).toHaveBeenCalledWith("cloudHandoffCapture")
+		expect(inspect).toHaveBeenCalledWith("/legacy", expect.any(Function))
 	})
 })
 
@@ -1036,6 +1042,7 @@ describe("cloud handoff controller", () => {
 		const identity = { accountId: "user-1", organizationId, organizationsKnown: true }
 		const controller = {
 			handoffCloud: undefined,
+			resetCloudHandoff: SdkController.prototype["resetCloudHandoff"],
 			handoffAccountChanges: 0,
 			getCloudAccountScope() {
 				return SdkController.prototype["getCloudAccountScope"].call(this as never)

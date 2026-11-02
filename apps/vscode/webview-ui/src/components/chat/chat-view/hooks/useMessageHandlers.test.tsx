@@ -119,6 +119,13 @@ const completedConversation: ClineMessage[] = [
 	{ ts: 2, type: "say", say: "completion_result", text: "all done" },
 ]
 
+function renderConversation() {
+	return renderHook(() => {
+		const chatState = useChatState(completedConversation)
+		return { chatState, handlers: useMessageHandlers(completedConversation, chatState) }
+	})
+}
+
 describe("useMessageHandlers — send routing", () => {
 	beforeEach(() => {
 		prepareHandoff.mockClear()
@@ -170,10 +177,7 @@ describe("useMessageHandlers — send routing", () => {
 		{ edited: true, phase: "complete" },
 	] as const)("consumes only the confirmed handoff draft ($phase, edited=$edited)", async ({ edited, phase }) => {
 		mockTaskId = "local-task"
-		const { result, rerender } = renderHook(() => {
-			const chatState = useChatState(completedConversation)
-			return { chatState, handlers: useMessageHandlers(completedConversation, chatState) }
-		})
+		const { result, rerender } = renderConversation()
 		act(() => {
 			result.current.chatState.setInputValue("/cloud finish tests")
 			result.current.chatState.setSelectedImages(["image"])
@@ -213,10 +217,7 @@ describe("useMessageHandlers — send routing", () => {
 		"preparation-failed",
 	] as const)("preserves local edits and offers the appropriate recovery after %s", async (outcome) => {
 		mockTaskId = "local-task"
-		const { result, rerender } = renderHook(() => {
-			const chatState = useChatState(completedConversation)
-			return { chatState, handlers: useMessageHandlers(completedConversation, chatState) }
-		})
+		const { result, rerender } = renderConversation()
 		act(() => {
 			result.current.chatState.setInputValue("/cloud finish tests")
 			result.current.chatState.setActiveQuote("quoted context")
@@ -301,10 +302,7 @@ describe("useMessageHandlers — send routing", () => {
 						rejectPreparation = reject
 					}),
 			)
-		const { result, rerender } = renderHook(() => {
-			const chatState = useChatState(completedConversation)
-			return { chatState, handlers: useMessageHandlers(completedConversation, chatState) }
-		})
+		const { result, rerender } = renderConversation()
 		act(() => {
 			result.current.chatState.setInputValue("/cloud original")
 			result.current.chatState.setActiveQuote("original quote")
@@ -352,10 +350,7 @@ describe("useMessageHandlers — send routing", () => {
 	it("clears the existing-handoff warning after dismissal without consuming the draft", async () => {
 		mockTaskId = "local-task"
 		mockHandoff = { id: "attempt", sourceTaskId: "local-task", phase: "failed", message: "Preparation unavailable" }
-		const { result, rerender } = renderHook(() => {
-			const chatState = useChatState(completedConversation)
-			return { chatState, handlers: useMessageHandlers(completedConversation, chatState) }
-		})
+		const { result, rerender } = renderConversation()
 		act(() => {
 			result.current.chatState.setInputValue("/cloud finish tests")
 			result.current.chatState.setSelectedImages(["image"])
@@ -387,10 +382,7 @@ describe("useMessageHandlers — send routing", () => {
 	it("keeps a rejected draft when a different handoff completes", async () => {
 		mockTaskId = "local-task"
 		prepareHandoff.mockRejectedValueOnce(new Error("Preparation unavailable"))
-		const { result, rerender } = renderHook(() => {
-			const chatState = useChatState(completedConversation)
-			return { chatState, handlers: useMessageHandlers(completedConversation, chatState) }
-		})
+		const { result, rerender } = renderConversation()
 		act(() => {
 			result.current.chatState.setInputValue("/cloud finish tests")
 			result.current.chatState.setSelectedImages(["image"])
