@@ -1,5 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+	readThemeSources,
+	unresolvedThemeReferences,
+} from "./theme-references";
 
 const packageRoot = join(import.meta.dir, "..");
 const readThemeFile = (name: string) =>
@@ -132,6 +136,11 @@ for (const subpath of [
 	if (!target || !existsSync(join(packageRoot, target))) {
 		throw new Error(`package.json export ${subpath} is missing or invalid`);
 	}
+}
+
+const unresolved = unresolvedThemeReferences(readThemeSources(packageRoot));
+if (unresolved.length) {
+	throw new Error(`Unresolved theme variables:\n${unresolved.join("\n")}`);
 }
 
 console.log("@cline/ui theme contract is valid");
