@@ -9,6 +9,10 @@ import {
 	type RgbaColor,
 	rgbToHex,
 } from "../components/mermaid-diagram";
+import {
+	readThemeSources,
+	unresolvedThemeReferences,
+} from "../scripts/theme-references";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const themeDir = join(packageRoot, "theme");
@@ -259,6 +263,38 @@ function contrastRatio(first: number[], second: number[]): number {
 }
 
 describe("@cline/ui theme contract", () => {
+	it("resolves static CSS variables throughout all components and theme entry points", () => {
+		expect(unresolvedThemeReferences(readThemeSources(packageRoot))).toEqual(
+			[],
+		);
+		expect(
+			unresolvedThemeReferences({
+				"input.tsx":
+					'className="focus:shadow-[0_0_0_1px_var(--cline-ui-primary)]"',
+				"theme.css":
+					":root { --primary: red; --color-cline-ui-primary: var(--primary); }",
+			}),
+		).toEqual(["input.tsx: --cline-ui-primary"]);
+		expect(
+			unresolvedThemeReferences({
+				"control.css":
+					".control { color: var(--optional-color, var(--foreground)); --foreground: black; }",
+			}),
+		).toEqual([]);
+		expect(
+			unresolvedThemeReferences({
+				"badge.tsx":
+					'className="hover:bg-(--missing-surface) text-(color:--missing-text)"',
+			}),
+		).toEqual(["badge.tsx: --missing-surface", "badge.tsx: --missing-text"]);
+		expect(
+			unresolvedThemeReferences({
+				"layout.tsx": 'className="max-w-(--breakpoint-lg)"',
+				"tooltip.css":
+					".tooltip { max-width: var(--radix-tooltip-content-available-width); }",
+			}),
+		).toEqual([]);
+	});
 	it("owns complete Cline brand and Radix solid and alpha palettes", () => {
 		const palette = read("palette.css");
 		const light = block(palette, ":root");
