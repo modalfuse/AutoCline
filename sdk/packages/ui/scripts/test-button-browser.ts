@@ -13,8 +13,6 @@ import {
 	IconButton,
 	iconButtonVariants,
 } from "../components/button.js";
-import { PillSelector, PillSelectorItem } from "../components/pill-selector.js";
-import { SegmentedControl } from "../components/segmented-control.js";
 import { Switch } from "../components/switch.js";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -65,12 +63,6 @@ const sizes = [
 		icon: 16,
 		iconOnly: 20,
 	},
-] as const;
-const segmentedSizes = [
-	{ size: "xs", height: 2, icon: 0.875 },
-	{ size: "sm", height: 2.25, icon: 1 },
-	{ size: "md", height: 2.5, icon: 1 },
-	{ size: "lg", height: 2.5, icon: 1.25 },
 ] as const;
 const utilities = [
 	"h-7",
@@ -306,37 +298,6 @@ const fixture = renderToStaticMarkup(
 				h("a", { id: "hidden-link", href: "#example" }, "Hidden link"),
 			),
 			h(Button, { id: "until-found", hidden: true }, "Findable button"),
-			h(SegmentedControl, {
-				id: "hidden-segmented",
-				hidden: true,
-				className: "inline-flex",
-				"aria-label": "Hidden segmented control",
-				options: [{ value: "day", label: "Day" }],
-			}),
-			h(
-				PillSelector,
-				{
-					id: "hidden-pill-group",
-					hidden: true,
-					className: "flex",
-					"aria-label": "Hidden categories",
-				},
-				h(PillSelectorItem, { value: "all" }, "All"),
-			),
-			h(
-				PillSelector,
-				{ "aria-label": "Categories with hidden option" },
-				h(
-					PillSelectorItem,
-					{
-						id: "hidden-pill-item",
-						hidden: true,
-						className: "inline-flex",
-						value: "all",
-					},
-					"All",
-				),
-			),
 			h(
 				Button,
 				{ asChild: true, variant: "ghost", trailingIcon: FixtureIcon },
@@ -373,34 +334,6 @@ const fixture = renderToStaticMarkup(
 					className: buttonVariants({ variant: "secondary", tone: "neutral" }),
 				},
 				"Variant helper",
-			),
-		),
-		h(
-			"div",
-			{
-				style: {
-					display: "flex",
-					flexWrap: "wrap",
-					alignItems: "flex-start",
-					gap: 16,
-				},
-			},
-			...segmentedSizes.flatMap(({ size }) =>
-				(["text", "icons", "mixed"] as const).map((mode) =>
-					h(SegmentedControl, {
-						id: `segmented-${size}-${mode}`,
-						key: `${size}-${mode}`,
-						size,
-						"aria-label": `${size} ${mode}`,
-						defaultValue: "day",
-						iconOnly: mode === "icons",
-						options: ["day", "week", "month"].map((value) => ({
-							value,
-							label: value,
-							icon: mode === "text" ? undefined : h(FixtureIcon),
-						})),
-					}),
-				),
 			),
 		),
 	),
@@ -527,7 +460,6 @@ try {
 	});
 	let checkedPairs = 0;
 	let checkedLayouts = 0;
-	let checkedSegmentedLayouts = 0;
 	let checkedSwitchStates = 0;
 	let minimumContrast = Infinity;
 	for (const preflight of [true, false]) {
@@ -550,9 +482,6 @@ try {
 			"hidden-icon-button",
 			"hidden-badge",
 			"hidden-link",
-			"hidden-segmented",
-			"hidden-pill-group",
-			"hidden-pill-item",
 		]) {
 			const control = page.locator(`#${id}`);
 			assert.equal(
@@ -581,34 +510,6 @@ try {
 			element.setAttribute("hidden", "until-found");
 		});
 		assert.notEqual((await styles(page, "#until-found")).display, "none");
-		for (const rootSize of [15, 16, 20]) {
-			await page.evaluate((size) => {
-				document.documentElement.style.fontSize = `${size}px`;
-			}, rootSize);
-			for (const { size, height, icon } of segmentedSizes) {
-				for (const mode of ["text", "icons", "mixed"]) {
-					const selector = `#segmented-${size}-${mode}`;
-					const context = `${selector}/root=${rootSize}/preflight=${preflight}`;
-					assert.equal(
-						(await styles(page, selector)).height,
-						`${height * rootSize}px`,
-						context,
-					);
-					if (mode !== "text") {
-						const iconSize = await styles(
-							page,
-							`${selector} .cline-ui-segmented-control__option:first-child svg`,
-						);
-						assert.equal(iconSize.width, `${icon * rootSize}px`, context);
-						assert.equal(iconSize.height, `${icon * rootSize}px`, context);
-					}
-					checkedSegmentedLayouts++;
-				}
-			}
-		}
-		await page.evaluate(() =>
-			document.documentElement.style.removeProperty("font-size"),
-		);
 		const ghost = await styles(page, "#ghost-neutral");
 		assert.equal(ghost.borderWidth, "0px");
 		assert.equal(ghost.background, "rgba(0, 0, 0, 0)");
@@ -884,7 +785,7 @@ try {
 		}
 	}
 	console.log(
-		`Button browser checks passed with and without Preflight: ${checkedLayouts} LTR/RTL icon layouts, ${checkedSegmentedLayouts} segmented layouts at three root sizes, ${checkedSwitchStates} accent/neutral switch states, ${checkedPairs} text contrast pairs (minimum ${minimumContrast.toFixed(2)}:1), hidden controls, focus, forced colors, overrides, and reduced motion.`,
+		`Button browser checks passed with and without Preflight: ${checkedLayouts} LTR/RTL icon layouts, ${checkedSwitchStates} accent/neutral switch states, ${checkedPairs} text contrast pairs (minimum ${minimumContrast.toFixed(2)}:1), hidden controls, focus, forced colors, overrides, and reduced motion.`,
 	);
 } finally {
 	await browser.close();

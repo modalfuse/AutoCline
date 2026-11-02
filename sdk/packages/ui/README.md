@@ -208,18 +208,16 @@ The existing token names and component APIs remain available. Typography adds
 
 ## Shared controls
 
-Import `Button`, `IconButton`, `Badge`, `Switch`, `SegmentedControl`,
-`PillSelector`, `PillSelectorItem`, `Dialog`, and `AlertDialog` from
-`@cline/ui` after loading the theme and `@cline/ui/components.css`.
+Import `Button`, `IconButton`, `Badge`, and `Switch` from `@cline/ui` after
+loading the theme and `@cline/ui/components.css`.
 
 Buttons support `primary`, `secondary`, and `ghost` styles, with the existing
 `fill` and `surface` aliases retained. Icon props are optional; existing child
 icons keep working. Badges render spans by default and use a native button only
-when `interactive` is supplied. Switches and segmented controls retain native
-form behavior. Dialog state and actions remain owned by the consuming app.
+when `interactive` is supplied. Switches retain native form behavior.
 
 See [control adoption examples](./ADOPTION.md#buttons) for keyboard behavior,
-scoped portal containers, and compatible props. Stories cover light/dark modes
+press feedback, and compatible props. Stories cover light/dark modes
 and disabled, focus, and loading states.
 
 ## Agent-chat usage
