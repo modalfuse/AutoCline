@@ -3,6 +3,6 @@ import { Empty } from "@shared/proto/cline/common"
 import type { Controller } from "../index"
 
 export async function prepareHandoff(controller: Controller, request: PrepareCloudHandoffRequest): Promise<Empty> {
-	await controller.cloudHandoff.prepare(request)
+	await controller.prepareCloudHandoff(request)
 	return Empty.create()
 }

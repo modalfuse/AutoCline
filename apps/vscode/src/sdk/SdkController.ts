@@ -81,7 +81,11 @@ import {
 	getCheckpointRunCountForMessage,
 	isVisibleCheckpointUserMessage,
 } from "./sdk-checkpoints"
-import { type CapturedHandoffSource, SdkCloudHandoffCoordinator } from "./sdk-cloud-handoff-coordinator"
+import {
+	type CapturedHandoffSource,
+	type PrepareCloudHandoffInput,
+	SdkCloudHandoffCoordinator,
+} from "./sdk-cloud-handoff-coordinator"
 import { type CloudTaskInput, SdkCloudSessionCoordinator } from "./sdk-cloud-session-coordinator"
 import { SdkCloudTaskTarget } from "./sdk-cloud-task-target"
 import { SdkCompactionCoordinator } from "./sdk-compaction-coordinator"
@@ -1677,6 +1681,8 @@ export class Controller {
 	private getHandoffAccount() {
 		if (this.handoffAccountChanges > 0) return undefined
 		const user = this.authService.getInfo().user
+		const organizations = this.authService.getUserOrganizations()
+		if (!organizations) return undefined
 		const key = this.getCloudAccountScope()
 		if (!user?.uid || !key) return undefined
 		if (this.handoffAccountKey !== key) {
@@ -1688,7 +1694,7 @@ export class Controller {
 				?.dispose()
 				.catch((error) => Logger.error("[SdkController] Failed to dispose previous cloud handoff", error))
 		}
-		const org = this.authService.getUserOrganizations()?.find((organization) => organization.active)
+		const org = organizations.find((organization) => organization.active)
 		return {
 			key,
 			accountId: user.uid,
@@ -1697,18 +1703,28 @@ export class Controller {
 		}
 	}
 
+	async prepareCloudHandoff(input: PrepareCloudHandoffInput): Promise<void> {
+		if (
+			isCloudSessionsFeatureEnabled() &&
+			this.handoffAccountChanges === 0 &&
+			this.authService.getInfo().user &&
+			!this.authService.getUserOrganizations()
+		) {
+			await this.authService.restoreRefreshTokenAndRetrieveAuthInfo()
+			if (this.authService.getInfo().user && !this.authService.getUserOrganizations()) {
+				throw new Error("Could not verify the cloud organization. Check your connection and run /cloud again.")
+			}
+		}
+		await this.cloudHandoff.prepare(input)
+	}
+
 	private getHandoffCloud(): CloudSessionController {
 		const account = this.getHandoffAccount()
 		if (!account) throw new Error("Sign in to Cline before using /cloud.")
 		if (this.handoffCloud) return this.handoffCloud
-		const { accountId, organizationId } = account
+		const { organizationId } = account
 		const assertCurrent = () => {
-			if (
-				this.handoffCloud !== cloud ||
-				this.handoffAccountChanges > 0 ||
-				this.authService.getInfo().user?.uid !== accountId ||
-				this.authService.getActiveOrganizationId() !== organizationId
-			)
+			if (this.getHandoffAccount()?.key !== account.key || this.handoffCloud !== cloud)
 				throw new Error("The cloud account or organization changed. Run /cloud again.")
 		}
 		const getAuthToken = async () => {

@@ -60,7 +60,7 @@ export interface ClineAccountUserInfo {
 	displayName: string
 	email: string
 	id: string
-	organizations: ClineAccountOrganization[]
+	organizations?: ClineAccountOrganization[]
 	appBaseUrl?: string
 	subject?: string
 	dataPrivacyPath?: string
@@ -296,7 +296,6 @@ export class AuthService {
 				id: credentials.accountId ?? "",
 				email: credentials.email ?? "",
 				displayName: "",
-				organizations: [],
 			},
 			provider,
 			startedAt,
@@ -317,6 +316,7 @@ export class AuthService {
 				`[SdkAuthService] fetchUserInfoFromApi: GET ${apiBaseUrl}/api/v1/users/me (tokenHash=${hashSecret(accessToken)})`,
 			)
 			const response = await axios.get(`${apiBaseUrl}/api/v1/users/me`, {
+				timeout: 10_000,
 				headers: {
 					Authorization: `Bearer ${bearerToken}`,
 					"Content-Type": "application/json",
@@ -917,7 +917,6 @@ export class AuthService {
 					email: tokenData.userInfo.email || "",
 					displayName: tokenData.userInfo.name || "",
 					createdAt: new Date().toISOString(),
-					organizations: [],
 				},
 				expiresAt: new Date(tokenData.expiresAt).getTime() / 1000,
 				provider: "cline",
@@ -987,7 +986,6 @@ export class AuthService {
 					id: creds.accountId ?? "",
 					email: "",
 					displayName: "",
-					organizations: [],
 				},
 				provider: "cline",
 				startedAt: creds.sessionStartedAtMs,
@@ -1032,15 +1030,15 @@ export class AuthService {
 			// Publish the full identity together; an incomplete profile is not a Personal account.
 			const userInfo =
 				(await this.fetchUserInfoFromApi(validCredentials.access)) ??
-				(previousUserInfo?.id && previousUserInfo.id === accountId ? previousUserInfo : undefined)
+				(previousUserInfo?.id && previousUserInfo.id === accountId
+					? previousUserInfo
+					: {
+							...restoredAuthInfo.userInfo,
+							id: accountId,
+							email: validCredentials.email ?? restoredAuthInfo.userInfo.email,
+						})
 			if (this._clineAuthInfo !== authBeforeProfile || readClineCredentials()?.accessToken !== validCredentials.access)
 				return
-			if (!userInfo) {
-				this._authenticated = false
-				this._clineAuthInfo = null
-				await this.sendAuthStatusUpdate()
-				return
-			}
 			this._clineAuthInfo = {
 				idToken: validCredentials.access,
 				refreshToken: validCredentials.refresh,

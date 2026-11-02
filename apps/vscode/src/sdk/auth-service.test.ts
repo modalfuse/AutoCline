@@ -765,10 +765,17 @@ describe("AuthService", () => {
 			expect(testAccess(authService)._clineAuthInfo?.idToken).toBe("raw-access-token")
 		})
 
-		it.each(["user-123", "other-user"])("uses only %s's known profile when the profile lookup fails", async (accountId) => {
+		it.each([
+			{ accountId: "user-123", cached: true },
+			{ accountId: "other-user", cached: true },
+			{ accountId: "user-123", cached: false },
+			{ accountId: undefined, cached: false },
+		])("keeps $accountId signed in when the profile lookup fails (cached: $cached)", async ({ accountId, cached }) => {
 			const previous = createTestAuthInfo()
-			testAccess(authService)._clineAuthInfo = previous
-			testAccess(authService)._authenticated = true
+			if (cached) {
+				testAccess(authService)._clineAuthInfo = previous
+				testAccess(authService)._authenticated = true
+			}
 			mockProviderSettings.set("cline", {
 				provider: "cline",
 				auth: { accessToken: "stored-token", refreshToken: "r", accountId },
@@ -776,9 +783,21 @@ describe("AuthService", () => {
 			vi.mocked(getValidClineCredentials).mockResolvedValue({ ...createTestOAuthCredentials(), accountId })
 			vi.mocked(axios.get).mockRejectedValueOnce(new Error("Profile unavailable"))
 			await authService.restoreRefreshTokenAndRetrieveAuthInfo()
-			expect(authService.getInfo().user?.uid).toBe(accountId === previous.userInfo.id ? accountId : undefined)
-			expect(authService.getActiveOrganizationId()).toBe(accountId === previous.userInfo.id ? "org-personal" : null)
+			expect(authService.getInfo().user?.uid).toBe(accountId ?? "")
+			expect(await authService.getAuthToken()).toBe("workos:oauth-access-token")
+			expect(authService.getUserOrganizations()).toEqual(
+				cached && accountId === previous.userInfo.id ? previous.userInfo.organizations : undefined,
+			)
+			expect(authService.getActiveOrganizationId()).toBe(
+				cached && accountId === previous.userInfo.id ? "org-personal" : null,
+			)
 			expect(mockProviderSettings.get("cline")?.auth).toBeDefined()
+			const recoveredId = accountId ?? previous.userInfo.id
+			vi.mocked(axios.get).mockResolvedValueOnce({ data: { data: { ...previous.userInfo, id: recoveredId } } })
+			await authService.restoreRefreshTokenAndRetrieveAuthInfo()
+			expect(authService.getInfo().user?.uid).toBe(recoveredId)
+			expect(authService.getUserOrganizations()).toEqual(previous.userInfo.organizations)
+			expect(axios.get).toHaveBeenCalledTimes(2)
 		})
 
 		it("sets unauthenticated state when no credentials exist", async () => {

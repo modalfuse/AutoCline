@@ -1,8 +1,10 @@
 import * as cloudCore from "@cline/core/cloud"
 import { CLOUD_CREATION_UNCONFIRMED_ERROR_CODE } from "@shared/cloud/cloud-sessions"
 import type { ClineMessage, TurnState } from "@shared/ExtensionMessage"
+import { PrepareCloudHandoffRequest } from "@shared/proto/cline/cloud"
 import { GetTaskHistoryRequest } from "@shared/proto/cline/task"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { prepareHandoff } from "@/core/controller/cloud/prepareHandoff"
 import { ClineError } from "@/services/error/ClineError"
 import { telemetryService } from "@/services/telemetry"
 import { mockFetchForTesting } from "@/shared/net"
@@ -1031,7 +1033,7 @@ describe("cloud handoff controller", () => {
 	const repoUrl = "https://github.com/example/project"
 
 	function setup(organizationId: string | null = null) {
-		const identity = { accountId: "user-1", organizationId }
+		const identity = { accountId: "user-1", organizationId, organizationsKnown: true }
 		const controller = {
 			handoffCloud: undefined,
 			handoffAccountChanges: 0,
@@ -1044,10 +1046,13 @@ describe("cloud handoff controller", () => {
 			authService: {
 				getInfo: () => ({ user: { uid: identity.accountId } }),
 				getActiveOrganizationId: () => identity.organizationId,
+				restoreRefreshTokenAndRetrieveAuthInfo: vi.fn(async () => {}),
 				getUserOrganizations: () =>
-					identity.organizationId
-						? [{ active: true, organizationId: identity.organizationId, name: "Test organization" }]
-						: [],
+					!identity.organizationsKnown
+						? undefined
+						: identity.organizationId
+							? [{ active: true, organizationId: identity.organizationId, name: "Test organization" }]
+							: [],
 				getAuthToken: vi.fn(async () => "workos:extension-token"),
 			},
 			accountService: {
@@ -1056,7 +1061,10 @@ describe("cloud handoff controller", () => {
 				),
 			},
 			cloudSessions: { apiBaseUrl: "https://api.example.test", appBaseUrl: "https://app.example.test" },
-			cloudHandoff: { reset: vi.fn() },
+			cloudHandoff: { reset: vi.fn(), prepare: vi.fn(async () => {}) },
+			prepareCloudHandoff(input: Parameters<SdkController["prepareCloudHandoff"]>[0]) {
+				return SdkController.prototype.prepareCloudHandoff.call(this as never, input)
+			},
 			postStateToWebview: vi.fn(async () => {}),
 			providerConfigStoreSubscription: { dispose: vi.fn() },
 			setRemoteConfigCoreIntegration: vi.fn(async () => {}),
@@ -1077,6 +1085,35 @@ describe("cloud handoff controller", () => {
 		)
 		return { controller, cloud, identity, fetch }
 	}
+
+	it.each([
+		"user-1",
+		"",
+	])("recovers an unknown organization for account ID %j on the next handoff request", async (accountId) => {
+		vi.stubEnv("CLINE_CLOUD_SESSIONS", "1")
+		const { controller, cloud, identity } = setup()
+		const input = PrepareCloudHandoffRequest.create({ sourceTaskId: "local-task", instruction: "Continue in cloud" })
+		identity.organizationsKnown = false
+		identity.accountId = accountId
+		try {
+			expect(controller.getHandoffAccount()).toBeUndefined()
+			expect(controller.cloudHandoff.reset).not.toHaveBeenCalled()
+			await expect(prepareHandoff(controller as never, input)).rejects.toThrow("Could not verify the cloud organization")
+			expect(controller.cloudHandoff.prepare).not.toHaveBeenCalled()
+			expect(controller.authService.restoreRefreshTokenAndRetrieveAuthInfo).toHaveBeenCalledOnce()
+			controller.authService.restoreRefreshTokenAndRetrieveAuthInfo.mockImplementation(async () => {
+				identity.organizationsKnown = true
+				identity.accountId = "user-1"
+			})
+			await prepareHandoff(controller as never, input)
+			expect(controller.cloudHandoff.prepare).toHaveBeenCalledWith(input)
+			await prepareHandoff(controller as never, input)
+			expect(controller.authService.restoreRefreshTokenAndRetrieveAuthInfo).toHaveBeenCalledTimes(2)
+		} finally {
+			vi.unstubAllEnvs()
+			await cloud.dispose()
+		}
+	})
 
 	it.each(["account", "organization"])("replaces the cached handoff controller after an observed %s change", async (change) => {
 		const { controller, cloud, identity, fetch } = setup()
@@ -1174,14 +1211,15 @@ describe("cloud handoff controller", () => {
 		await cloud.dispose()
 	})
 
-	it("rejects a credential returned after the signed-in account changes", async () => {
+	it.each(["account changes", "organization becomes unknown"])("rejects a credential returned after the %s", async (change) => {
 		const { controller, cloud, identity, fetch } = setup()
 		const token = Promise.withResolvers<string>()
 		controller.authService.getAuthToken.mockReturnValueOnce(token.promise)
 		await mockFetchForTesting(fetch, async () => {
 			const preparing = cloud.prepareHandoffRepository(repoUrl)
 			await vi.waitFor(() => expect(controller.authService.getAuthToken).toHaveBeenCalledOnce())
-			identity.accountId = "user-2"
+			if (change === "account changes") identity.accountId = "user-2"
+			else identity.organizationsKnown = false
 			token.resolve("workos:stale-token")
 			await expect(preparing).rejects.toThrow("account or organization changed")
 		})
