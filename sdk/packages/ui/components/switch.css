@@ -186,6 +186,14 @@
 		background: var(--neutral-contrast);
 	}
 
+	:is(.dark .cline-ui-switch-neutral, .cline-ui-switch-neutral.dark)
+		.cline-ui-switch__input:enabled:checked
+		+ .cline-ui-switch__track
+		.cline-ui-switch__thumb {
+		/* Match the dark thumb to give it the same visual weight on the light track. */
+		box-shadow: 0 0 0 1px var(--neutral-contrast);
+	}
+
 	.cline-ui-switch__input:focus-visible + .cline-ui-switch__track {
 		outline: 2px solid var(--ring);
 		outline-offset: 2px;
