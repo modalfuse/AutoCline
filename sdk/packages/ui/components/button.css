@@ -228,7 +228,7 @@
 			background-color: color-mix(
 				in srgb,
 				var(--error-surface),
-				var(--error-text) 6%
+				var(--error-text) 4%
 			);
 		}
 
