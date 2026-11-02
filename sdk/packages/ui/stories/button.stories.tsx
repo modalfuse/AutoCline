@@ -96,7 +96,7 @@ function SparkIcon(props: SVGProps<SVGSVGElement>) {
 export const VariantMatrix = () => (
 	<div className="space-y-8 p-8">
 		<div>
-			<h2 className="mb-4 font-semibold text-sm">Button — variant × tone</h2>
+			<h2 className="mb-4 text-sm font-semibold">Button — variant × tone</h2>
 			<div
 				className="grid gap-3"
 				style={{ gridTemplateColumns: "auto repeat(3, auto)" }}
@@ -104,7 +104,7 @@ export const VariantMatrix = () => (
 				<div />
 				{VARIANTS.map((v) => (
 					<span
-						className="px-2 font-medium text-muted-foreground text-xs"
+						className="px-2 text-xs font-medium text-muted-foreground"
 						key={v}
 					>
 						{v}
@@ -112,7 +112,7 @@ export const VariantMatrix = () => (
 				))}
 				{TONES.map((tone) => (
 					<Fragment key={tone}>
-						<span className="flex items-center pr-4 font-medium text-muted-foreground text-xs">
+						<span className="flex items-center pr-4 text-xs font-medium text-muted-foreground">
 							{tone}
 						</span>
 						{VARIANTS.map((variant) => (
@@ -128,7 +128,7 @@ export const VariantMatrix = () => (
 		</div>
 
 		<div>
-			<h2 className="mb-4 font-semibold text-sm">
+			<h2 className="mb-4 text-sm font-semibold">
 				IconButton — variant × tone
 			</h2>
 			<div
@@ -138,7 +138,7 @@ export const VariantMatrix = () => (
 				<div />
 				{VARIANTS.map((v) => (
 					<span
-						className="px-2 font-medium text-muted-foreground text-xs"
+						className="px-2 text-xs font-medium text-muted-foreground"
 						key={v}
 					>
 						{v}
@@ -146,7 +146,7 @@ export const VariantMatrix = () => (
 				))}
 				{TONES.map((tone) => (
 					<Fragment key={tone}>
-						<span className="flex items-center pr-4 font-medium text-muted-foreground text-xs">
+						<span className="flex items-center pr-4 text-xs font-medium text-muted-foreground">
 							{tone}
 						</span>
 						{VARIANTS.map((variant) => (
@@ -169,7 +169,7 @@ export const VariantMatrix = () => (
 export const Sizes = () => (
 	<div className="space-y-8 p-8">
 		<div>
-			<h2 className="mb-4 font-semibold text-sm">Button sizes</h2>
+			<h2 className="mb-4 text-sm font-semibold">Button sizes</h2>
 			<div className="flex flex-wrap items-end gap-3">
 				{SIZES.map((size) => (
 					<Button key={size} size={size} tone="accent" variant="primary">
@@ -180,7 +180,7 @@ export const Sizes = () => (
 		</div>
 
 		<div>
-			<h2 className="mb-4 font-semibold text-sm">
+			<h2 className="mb-4 text-sm font-semibold">
 				IconButton sizes (same tokens)
 			</h2>
 			<div className="flex flex-wrap items-end gap-3">
@@ -201,7 +201,7 @@ export const Sizes = () => (
 
 export const WithIcons = () => (
 	<div className="space-y-4 p-8">
-		<h2 className="font-semibold text-sm">
+		<h2 className="text-sm font-semibold">
 			Button — with leading and trailing icons
 		</h2>
 		<div className="flex flex-wrap items-center gap-3">
@@ -351,7 +351,7 @@ export const PressFeedback = () => (
 
 export const Disabled = () => (
 	<div className="space-y-4 p-8">
-		<h2 className="font-semibold text-sm">Disabled state</h2>
+		<h2 className="text-sm font-semibold">Disabled state</h2>
 		{TONES.map((tone) => (
 			<div className="space-y-2" key={tone}>
 				<h3 className="text-muted-foreground text-xs">{tone}</h3>
@@ -390,11 +390,11 @@ export const DestructiveTone = () => (
 function ToneShowcase({ label, tone }: { label: string; tone: ButtonTone }) {
 	return (
 		<div className="space-y-6 p-8">
-			<h2 className="font-semibold text-sm">tone="{label}"</h2>
+			<h2 className="text-sm font-semibold">tone="{label}"</h2>
 			<div className="space-y-4">
 				{VARIANTS.map((variant) => (
 					<div className="flex items-center gap-6" key={variant}>
-						<span className="w-16 text-muted-foreground text-xs">
+						<span className="w-16 text-xs text-muted-foreground">
 							{variant}
 						</span>
 						<div className="flex items-center gap-3">
