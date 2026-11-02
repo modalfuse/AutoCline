@@ -354,6 +354,7 @@
 	--brand-magenta: oklch(0.75 0.15 330);
 	--brand-periwinkle: oklch(0.69 0.14 275);
 	--brand-cyan: oklch(0.87 0.07 210);
+	/* Opaque surface for chat bubbles, diagrams, and raster exports. */
 	--card-surface: color-mix(in srgb, var(--neutral-2) 50%, var(--neutral-3));
 	/* Solid roles choose brand steps that support white labels. */
 	--primary: var(--accent-9);
@@ -366,14 +367,14 @@
 	--font-weight-normal: 480;
 	--font-weight-medium: 560;
 	--font-weight-semibold: 640;
-	--font-weight-bold: 640;
+	--font-weight-bold: var(--font-weight-semibold);
 	/* 11px at 15px root */
 	--text-xxs: 0.73333rem;
 	--text-xxs--line-height: 1rem;
 	--text-xxs--letter-spacing: 0.0025em;
 	/* 12px at 15px root */
 	--text-xs: 0.8rem;
-	--text-xs--line-height: 1rem;
+	--text-xs--line-height: 1.1rem;
 	--text-xs--letter-spacing: 0.0025em;
 	/* 13px at 15px root */
 	--text-sm: 0.86667rem;
@@ -494,7 +495,9 @@
 	/* Standard shadcn semantic surfaces. */
 	--background: var(--surface-1);
 	--foreground: var(--text-1);
-	--card: var(--surface-2);
+	/* Translucent cards inherit their backing surface; use --card-surface
+	 * whenever a consumer requires an opaque color. */
+	--card: color-mix(in srgb, var(--neutral-a1), var(--neutral-a2));
 	--card-foreground: var(--text-1);
 	--popover: var(--surface-2);
 	--popover-foreground: var(--text-1);
