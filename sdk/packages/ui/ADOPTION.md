@@ -262,135 +262,43 @@ For native controls that should follow the selected theme:
 
 ## Buttons
 
-Import `Button` and `IconButton` from `@cline/ui` with theme tokens and
-`@cline/ui/components.css`. Choose `variant` for emphasis and `tone` for color:
+Import `Button` and `IconButton` from `@cline/ui` after loading the theme and
+`@cline/ui/components.css`. Use `primary` for main actions, `secondary` for
+supporting actions, and `ghost` for low-emphasis actions. Existing `fill` and
+`surface` variants remain aliases for `primary` and `secondary`.
 
-| Variant | Purpose |
-| --- | --- |
-| `primary` | The main action, with a solid high-contrast background |
-| `secondary` | A supporting action, with a softer visible background |
-| `ghost` | A low-emphasis action, with a background on hover |
-
-Existing `fill` and `surface` variants remain supported as aliases for `primary`
-and `secondary`, including in `buttonVariants` and `iconButtonVariants`.
-
-All variants support `accent`, `neutral`, and `destructive` tones. A primary
-neutral button is dark with light text in light mode and light with dark text
-in dark mode. A secondary neutral button has a visible gray background in both
-themes. `Button` defaults to primary/accent/md; `IconButton` defaults to
-ghost/neutral/sm. Both support `xs`, `sm`, `md`, and `lg` sizes.
-
-Without `asChild`, buttons default to `type="button"`; set `type="submit"` for
-form submission. With `asChild`, no default type is added: a native button
-without a type retains its implicit form submission behavior. Set `type="button"`
-on the child or wrapper to prevent submission. An explicit child `type` takes
-precedence over the wrapper's `type`. Links receive no default button type.
-`IconButton` requires an accessible `aria-label`.
-
-For composed children, `disabled` makes `aria-disabled`, `data-disabled`, and
-`tabIndex` authoritative, suppresses click and Enter/Space activation, and sets
-the native `disabled` attribute on direct button children. Custom components
-must forward these props and honor native disabled behavior when they render
-a button.
-
-Primary labels use the theme's normal weight (480 in light mode and 400 in dark
-mode), except neutral primary uses the medium weight in dark mode (500).
-Secondary and ghost use the theme's medium weight (560 in light mode and 500 in
-dark mode). These values follow `--font-weight-normal` and
-`--font-weight-medium` overrides.
-
-`Button` accepts SVG component references through `leadingIcon` and
-`trailingIcon`; `IconButton` accepts `icon`. Pass the component (`Plus`), not an
-already rendered element (`<Plus />`). Button size controls both icon dimensions
-and spacing, so consumers do not add size classes or position markers. Each
-occupied slot tightens padding on its side automatically. Icons inherit the
-button color and receive `aria-hidden="true"` and `focusable="false"`;
-`IconButton` still requires an accessible label.
-
-`IconButton` and `MessageAction` also support existing icon children when `icon`
-is omitted. Legacy `IconButton asChild` composition preserves the child's
-contents, refs, and events. When provided, `icon` supplies the control's content
-instead. Prefer the managed icon props for new components.
+Both controls support `accent`, `neutral`, and `destructive` tones and
+`xs`, `sm`, `md`, and `lg` sizes. `Button` defaults to primary/accent/md;
+`IconButton` defaults to ghost/neutral/sm.
 
 ```tsx
-import { Button, IconButton, type ButtonIcon } from "@cline/ui";
-import { ChevronDown, Plus, X } from "lucide-react";
+import { Button, IconButton } from "@cline/ui";
+import { Plus, X } from "lucide-react";
 
 <Button leadingIcon={Plus}>New session</Button>
-<Button tone="neutral" variant="secondary" trailingIcon={ChevronDown}>
-  More options
-</Button>
-<Button leadingIcon={Plus} trailingIcon={ChevronDown}>
-  Add to group
-</Button>
+<Button tone="neutral" variant="secondary">More options</Button>
 <IconButton icon={X} aria-label="Close" />
-
-const CustomIcon: ButtonIcon = (props) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
-    <path d="M5 12h14M12 5v14" />
-  </svg>
-);
-
-<Button leadingIcon={CustomIcon}>Custom icon</Button>
-<Button asChild trailingIcon={ChevronDown}>
-  <a href="/options">Options</a>
-</Button>
-<IconButton asChild icon={Plus} aria-label="Create session">
-  <a href="/new" />
-</IconButton>
 ```
 
-Custom icons must forward SVG props, including `className`, to their root SVG.
-Define wrappers outside the rendering component and merge any animation classes
-with the supplied class instead of setting dimensions. With `asChild`, managed
-icons render inside the single composed element; it must render its children
-as its root contents. Place Radix `asChild` triggers or other slot wrappers
-outside the button, for example `<DialogTrigger asChild><Button
-leadingIcon={Plus}>Create</Button></DialogTrigger>`. Do not put another slot
-wrapper inside `Button asChild` or `IconButton asChild`.
-Managed icon props leave unrelated SVGs within arbitrary button content alone.
-Without managed icons, legacy SVG children retain size-based defaults unless
-they supply their own `size-*` class.
+Pass SVG components through `leadingIcon`, `trailingIcon`, or `icon`; the button
+handles sizing, spacing, and decorative accessibility. Custom icons must forward
+SVG props, including `className`. `IconButton` requires an accessible label.
+Existing icon children remain supported, including in `MessageAction`.
 
-Use `size` for normal icon sizing. For a deliberate exception, set
-`--cline-ui-button-icon-size` on the button, for example
-`className="[--cline-ui-button-icon-size:1.25rem]"`. This changes both managed
-slots together. There is no separate icon-size prop to drift from the button.
-The button stylesheet includes native-control resets scoped to the component,
-so both buttons and composed links work without Tailwind Preflight. Colors,
-spacing, radii, and typography use the existing shared theme variables. Defaults
-live in the `components` cascade layer; Tailwind utilities passed through
-`className` override them, including icon spacing. For example,
-`<Button className="h-7 gap-0 px-2">` customizes height, gap, and horizontal
-padding while preserving the selected appearance.
+Buttons default to `type="button"`; use `type="submit"` for forms. With `asChild`,
+the child's native type behavior is preserved, so set `type="button"` explicitly
+when needed. Custom composed children must forward props, refs, and children;
+place Radix slot triggers outside the control.
 
-Both components scale to `0.98` while pressed, with a 40ms ease-out transition.
-Set `pressScale={false}` to disable the effect or supply a number to customize
-it. Press feedback also works with `asChild`; disabled controls and users who
-prefer reduced motion receive no scaling.
-
-```tsx
-<Button>Default feedback</Button>
-<Button pressScale={false}>No scaling</Button>
-<Button pressScale={0.95}>Custom scale</Button>
-<IconButton icon={Plus} aria-label="Add" pressScale={0.95} />
-```
-
-Existing call sites can keep `variant="fill"`, `variant="surface"`, and icon
-children. For new or updated call sites, prefer `primary`, `secondary`, and
-managed icon props. Neutral primary has higher contrast than the old neutral
-fill; choose secondary when the action should stay subtle. When adopting
-`leadingIcon`, `trailingIcon`, or `icon`, remove consumer size classes and
-`data-icon` markers from that icon; the component supplies them.
+Use `className` to override component styles and `pressScale={false}` to disable
+press feedback. See the button stories for more examples.
 
 ## Badges
 
-`Badge` renders a span by default and supports neutral, accent, info, success,
-warning, and error tones, with soft or ghost surfaces and `sm`, `xs`, or `xxs`
-sizes. Existing span attributes, click handlers, and refs remain supported.
-Use `interactive` to opt into a native button, with button attributes, disabled
-behavior, and a button ref. `BadgeProps` stays the extendable span interface;
-`InteractiveBadgeProps` describes the button variant.
+`Badge` renders a span by default. Choose a neutral, accent, info, success,
+warning, or error tone; a soft or ghost variant; and an `sm`, `xs`, or `xxs` size.
+Use `interactive` for a native button with disabled behavior and a button ref.
+`BadgeProps` describes the span; `InteractiveBadgeProps` describes the button.
 
 ```tsx
 <Badge tone="success">Connected</Badge>
@@ -440,13 +348,9 @@ fieldsets, are excluded from form submission.
 The switch scales with the root font size and reserves a minimum 24px hit area
 on each axis by default.
 
-The default `tone="accent"` uses the shared accent treatment for checked tracks
-and `--primary-emphasis` on hover, with a contrasting thumb.
-Use `tone="neutral"` for a checked track using `--neutral-solid` and
-`--neutral-solid-hover`, with a contrasting `--neutral-contrast` thumb. The
-neutral checked track is dark in light mode and light in dark mode. Both tones
-share off and disabled styles; keyboard focus uses `--ring`. The switch supports
-light/dark themes, system colors in forced-colors mode, and reduced motion.
+The default `tone="accent"` uses the shared accent colors. Use `tone="neutral"`
+for a checked track that is dark in light mode and light in dark mode. Both tones
+support keyboard focus, forced colors, and reduced motion.
 
 When migrating from the desktop's Radix wrapper, update button refs to
 `HTMLInputElement` and read the native `checked` property in tests instead of
