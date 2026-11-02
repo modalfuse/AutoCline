@@ -87,8 +87,9 @@ export class SdkCloudHandoffCoordinator {
 
 	viewFor(taskId: string | undefined): CloudHandoffView | undefined {
 		if (!taskId) return undefined
+		const account = this.options.getAccount()
 		const attempt = this.attempts.get(taskId)
-		if (!attempt || attempt.accountKey !== this.options.getAccount()?.key) return undefined
+		if (!attempt || attempt.accountKey !== account?.key) return undefined
 		const { id, phase } = attempt
 		const base = { id, sourceTaskId: attempt.sourceTaskId }
 		switch (phase) {
@@ -335,7 +336,8 @@ export class SdkCloudHandoffCoordinator {
 	}
 
 	private assertCurrent(attempt: Attempt): void {
-		if (this.attempts.get(attempt.sourceTaskId) !== attempt || this.options.getAccount()?.key !== attempt.accountKey) {
+		const account = this.options.getAccount()
+		if (this.attempts.get(attempt.sourceTaskId) !== attempt || account?.key !== attempt.accountKey) {
 			throw new Error("The cloud account or preparation changed. Run /cloud again.")
 		}
 	}

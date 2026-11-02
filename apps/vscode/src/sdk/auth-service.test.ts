@@ -10,6 +10,7 @@
 
 import path from "node:path"
 import { getValidClineCredentials, type ITelemetryService, type OAuthCredentials } from "@cline/core"
+import axios from "axios"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AuthService, type ClineAuthInfo, LogoutReason } from "./auth-service"
 
@@ -540,6 +541,7 @@ describe("AuthService", () => {
 		// the round-trip through the public restore/logout surface.
 
 		it("restores credentials persisted in providers.json", async () => {
+			vi.mocked(axios.get).mockResolvedValueOnce({ data: { data: createTestAuthInfo().userInfo } })
 			mockProviderSettings.set("cline", {
 				provider: "cline",
 				auth: {
@@ -609,6 +611,7 @@ describe("AuthService", () => {
 		})
 
 		it("keeps a ClinePass last-used selection when credentials are refreshed on restore (#13501)", async () => {
+			vi.mocked(axios.get).mockResolvedValueOnce({ data: { data: createTestAuthInfo().userInfo } })
 			mockLastUsedProvider = "cline-pass"
 			mockProviderSettings.set("cline", {
 				provider: "cline",
@@ -681,7 +684,70 @@ describe("AuthService", () => {
 	})
 
 	describe("restoreRefreshTokenAndRetrieveAuthInfo()", () => {
+		it.each([
+			true,
+			false,
+		])("does not restore a signed-out account after a pending profile lookup (warm: %s)", async (warm) => {
+			const previous = createTestAuthInfo()
+			if (warm) {
+				testAccess(authService)._clineAuthInfo = previous
+				testAccess(authService)._authenticated = true
+			}
+			mockProviderSettings.set("cline", {
+				provider: "cline",
+				auth: { accessToken: "stored-token", refreshToken: "r", accountId: previous.userInfo.id },
+			})
+			vi.mocked(getValidClineCredentials).mockResolvedValue({
+				...createTestOAuthCredentials(),
+				accountId: previous.userInfo.id,
+			})
+			const profile = Promise.withResolvers<{ data: { data: ClineAuthInfo["userInfo"] } }>()
+			vi.mocked(axios.get).mockReturnValueOnce(profile.promise)
+			const restoring = authService.restoreRefreshTokenAndRetrieveAuthInfo()
+			await vi.waitFor(() => expect(axios.get).toHaveBeenCalledOnce())
+			await authService.handleDeauth(LogoutReason.USER_INITIATED)
+			profile.resolve({ data: { data: previous.userInfo } })
+			await restoring
+			expect(authService.getInfo().user).toBeUndefined()
+			expect(await authService.getAuthToken()).toBeNull()
+			expect(mockProviderSettings.get("cline")?.auth).toBeUndefined()
+		})
+
+		it.each([
+			{ accountId: "user-123", recover: false },
+			{ accountId: "other-user", recover: false },
+			{ accountId: "user-123", recover: true },
+		])("publishes $accountId's restored identity atomically (recover: $recover)", async ({ accountId, recover }) => {
+			const previous = createTestAuthInfo()
+			testAccess(authService)._clineAuthInfo = previous
+			testAccess(authService)._authenticated = true
+			mockProviderSettings.set("cline", {
+				provider: "cline",
+				auth: { accessToken: "stored-token", refreshToken: "r", accountId },
+			})
+			vi.mocked(getValidClineCredentials).mockResolvedValue({ ...createTestOAuthCredentials(), accountId })
+			if (recover) {
+				vi.mocked(getValidClineCredentials).mockRejectedValueOnce(new Error("Temporary connection failure"))
+				await authService.restoreRefreshTokenAndRetrieveAuthInfo()
+				expect(authService.getInfo().user).toBeUndefined()
+			}
+			const profile = Promise.withResolvers<{ data: { data: ClineAuthInfo["userInfo"] } }>()
+			vi.mocked(axios.get).mockReturnValueOnce(profile.promise)
+			const restoring = authService.restoreRefreshTokenAndRetrieveAuthInfo()
+			await vi.waitFor(() => expect(axios.get).toHaveBeenCalledOnce())
+			try {
+				expect(authService.getInfo().user?.uid).toBe(recover ? undefined : previous.userInfo.id)
+				expect(authService.getActiveOrganizationId()).toBe(recover ? null : "org-personal")
+			} finally {
+				profile.resolve({ data: { data: { ...previous.userInfo, id: accountId, organizations: [] } } })
+				await restoring
+			}
+			expect(authService.getActiveOrganizationId()).toBeNull()
+			expect(authService.getInfo().user?.uid).toBe(accountId)
+		})
+
 		it("strips the workos: prefix from the persisted access token", async () => {
+			vi.mocked(axios.get).mockResolvedValueOnce({ data: { data: createTestAuthInfo().userInfo } })
 			mockProviderSettings.set("cline", {
 				provider: "cline",
 				auth: { accessToken: "workos:raw-access-token", refreshToken: "r", accountId: "user-123" },
@@ -697,6 +763,22 @@ describe("AuthService", () => {
 			await authService.restoreRefreshTokenAndRetrieveAuthInfo()
 
 			expect(testAccess(authService)._clineAuthInfo?.idToken).toBe("raw-access-token")
+		})
+
+		it.each(["user-123", "other-user"])("uses only %s's known profile when the profile lookup fails", async (accountId) => {
+			const previous = createTestAuthInfo()
+			testAccess(authService)._clineAuthInfo = previous
+			testAccess(authService)._authenticated = true
+			mockProviderSettings.set("cline", {
+				provider: "cline",
+				auth: { accessToken: "stored-token", refreshToken: "r", accountId },
+			})
+			vi.mocked(getValidClineCredentials).mockResolvedValue({ ...createTestOAuthCredentials(), accountId })
+			vi.mocked(axios.get).mockRejectedValueOnce(new Error("Profile unavailable"))
+			await authService.restoreRefreshTokenAndRetrieveAuthInfo()
+			expect(authService.getInfo().user?.uid).toBe(accountId === previous.userInfo.id ? accountId : undefined)
+			expect(authService.getActiveOrganizationId()).toBe(accountId === previous.userInfo.id ? "org-personal" : null)
+			expect(mockProviderSettings.get("cline")?.auth).toBeDefined()
 		})
 
 		it("sets unauthenticated state when no credentials exist", async () => {

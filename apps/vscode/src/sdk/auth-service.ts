@@ -970,6 +970,7 @@ export class AuthService {
 	 * live in providers.json, user info is fetched fresh each session.
 	 */
 	async restoreRefreshTokenAndRetrieveAuthInfo(): Promise<void> {
+		const previousUserInfo = this._clineAuthInfo?.userInfo
 		try {
 			const creds = readClineCredentials()
 			if (!creds) {
@@ -1026,30 +1027,29 @@ export class AuthService {
 				sessionStartedAtMs: readSessionStartedAtMs(validCredentials.metadata),
 			})
 
+			const accountId = validCredentials.accountId ?? restoredAuthInfo.userInfo.id
+			const authBeforeProfile = this._clineAuthInfo
+			// Publish the full identity together; an incomplete profile is not a Personal account.
+			const userInfo =
+				(await this.fetchUserInfoFromApi(validCredentials.access)) ??
+				(previousUserInfo?.id && previousUserInfo.id === accountId ? previousUserInfo : undefined)
+			if (this._clineAuthInfo !== authBeforeProfile || readClineCredentials()?.accessToken !== validCredentials.access)
+				return
+			if (!userInfo) {
+				this._authenticated = false
+				this._clineAuthInfo = null
+				await this.sendAuthStatusUpdate()
+				return
+			}
 			this._clineAuthInfo = {
 				idToken: validCredentials.access,
 				refreshToken: validCredentials.refresh,
 				expiresAt: validCredentials.expires ? validCredentials.expires / 1000 : undefined,
-				userInfo: {
-					...restoredAuthInfo.userInfo,
-					id: validCredentials.accountId ?? restoredAuthInfo.userInfo.id,
-					email: validCredentials.email ?? restoredAuthInfo.userInfo.email,
-				},
+				userInfo,
 				provider: restoredAuthInfo.provider,
 				startedAt: restoredAuthInfo.startedAt,
 			}
 			this._authenticated = true
-
-			// Fetch full user info from the API (the key step — fills in
-			// email, displayName, organizations that providers.json doesn't store)
-			if (this._authenticated && this._clineAuthInfo) {
-				const userInfo = await this.fetchUserInfoFromApi(this._clineAuthInfo.idToken)
-				if (userInfo) {
-					this._clineAuthInfo.userInfo = userInfo
-				} else {
-					Logger.warn("[SdkAuthService] Could not fetch user info on restore — UI will show limited profile")
-				}
-			}
 
 			await this.sendAuthStatusUpdate()
 

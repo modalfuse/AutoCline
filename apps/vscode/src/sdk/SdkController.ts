@@ -206,6 +206,7 @@ interface CloudTarget {
 export class Controller {
 	readonly cloudHandoff: SdkCloudHandoffCoordinator
 	private handoffCloud?: CloudSessionController
+	private handoffAccountKey?: string
 	private handoffAccountChanges = 0
 	// SDK session state and the coordinators that drive it.
 	private messageTranslatorState: MessageTranslatorState
@@ -689,10 +690,7 @@ export class Controller {
 			getAuthToken: () => this.authService.getAuthToken(),
 			getActiveOrganizationId: () => this.authService.getActiveOrganizationId(),
 		})
-		const getAccountScope = () => {
-			const userId = this.authService.getInfo().user?.uid
-			return userId ? `${userId}:${this.authService.getActiveOrganizationId() ?? ""}` : undefined
-		}
+		const getAccountScope = () => this.getCloudAccountScope()
 		this.cloudTaskTarget = new SdkCloudTaskTarget({
 			cloudSessions: this.cloudSessions,
 			stateManager: this.stateManager,
@@ -752,18 +750,7 @@ export class Controller {
 		this.cloudHandoff = new SdkCloudHandoffCoordinator({
 			capture: (sourceTaskId, signal) => this.captureCloudHandoffSource(sourceTaskId, signal),
 			getCloud: () => this.getHandoffCloud(),
-			getAccount: () => {
-				if (this.handoffAccountChanges > 0) return undefined
-				const user = this.authService.getInfo().user
-				if (!user?.uid) return undefined
-				const org = this.authService.getUserOrganizations()?.find((organization) => organization.active)
-				return {
-					key: `${user.uid}:${org?.organizationId ?? ""}`,
-					accountId: user.uid,
-					organizationId: org?.organizationId ?? null,
-					organizationName: org?.name ?? "Personal",
-				}
-			},
+			getAccount: () => this.getHandoffAccount(),
 			assertEnabled: () => {
 				if (!isCloudSessionsFeatureEnabled()) throw new Error("Enable Cloud sessions in Settings to use /cloud.")
 			},
@@ -1682,13 +1669,41 @@ export class Controller {
 		await this.compaction.compactTask()
 	}
 
+	private getCloudAccountScope(): string | undefined {
+		const userId = this.authService.getInfo().user?.uid
+		return userId ? `${userId}:${this.authService.getActiveOrganizationId() ?? ""}` : undefined
+	}
+
+	private getHandoffAccount() {
+		if (this.handoffAccountChanges > 0) return undefined
+		const user = this.authService.getInfo().user
+		const key = this.getCloudAccountScope()
+		if (!user?.uid || !key) return undefined
+		if (this.handoffAccountKey !== key) {
+			this.handoffAccountKey = key
+			const cloud = this.handoffCloud
+			this.handoffCloud = undefined
+			this.cloudHandoff.reset()
+			void cloud
+				?.dispose()
+				.catch((error) => Logger.error("[SdkController] Failed to dispose previous cloud handoff", error))
+		}
+		const org = this.authService.getUserOrganizations()?.find((organization) => organization.active)
+		return {
+			key,
+			accountId: user.uid,
+			organizationId: org?.organizationId ?? null,
+			organizationName: org?.name ?? "Personal",
+		}
+	}
+
 	private getHandoffCloud(): CloudSessionController {
+		const account = this.getHandoffAccount()
+		if (!account) throw new Error("Sign in to Cline before using /cloud.")
 		if (this.handoffCloud) return this.handoffCloud
-		const accountId = this.authService.getInfo().user?.uid
-		const organizationId = this.authService.getActiveOrganizationId()
+		const { accountId, organizationId } = account
 		const assertCurrent = () => {
 			if (
-				!accountId ||
 				this.handoffCloud !== cloud ||
 				this.handoffAccountChanges > 0 ||
 				this.authService.getInfo().user?.uid !== accountId ||

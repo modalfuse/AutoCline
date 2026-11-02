@@ -8,6 +8,7 @@ import { telemetryService } from "@/services/telemetry"
 import { mockFetchForTesting } from "@/shared/net"
 import { isClineManagedProvider } from "@/shared/utils/cline"
 import { Controller as SdkController } from "./SdkController"
+import { SdkCloudHandoffCoordinator } from "./sdk-cloud-handoff-coordinator"
 import { createTaskProxy, type TaskProxy } from "./task-proxy"
 import { resolveWorkspaceManagerPaths, resolveWorkspaceRootPath } from "./workspace-root"
 
@@ -1034,14 +1035,24 @@ describe("cloud handoff controller", () => {
 		const controller = {
 			handoffCloud: undefined,
 			handoffAccountChanges: 0,
+			getCloudAccountScope() {
+				return SdkController.prototype["getCloudAccountScope"].call(this as never)
+			},
+			getHandoffAccount() {
+				return SdkController.prototype["getHandoffAccount"].call(this as never)
+			},
 			authService: {
 				getInfo: () => ({ user: { uid: identity.accountId } }),
 				getActiveOrganizationId: () => identity.organizationId,
+				getUserOrganizations: () =>
+					identity.organizationId
+						? [{ active: true, organizationId: identity.organizationId, name: "Test organization" }]
+						: [],
 				getAuthToken: vi.fn(async () => "workos:extension-token"),
 			},
 			accountService: {
 				fetchUserOrganizationsRPC: vi.fn<() => Promise<Array<{ active: boolean; organizationId: string }> | undefined>>(
-					async () => (organizationId ? [{ active: true, organizationId }] : []),
+					async () => (identity.organizationId ? [{ active: true, organizationId: identity.organizationId }] : []),
 				),
 			},
 			cloudSessions: { apiBaseUrl: "https://api.example.test", appBaseUrl: "https://app.example.test" },
@@ -1060,11 +1071,78 @@ describe("cloud handoff controller", () => {
 			sdkTelemetry: { dispose: vi.fn(async () => {}) },
 		}
 		const cloud = SdkController.prototype["getHandoffCloud"].call(controller as never)
+		controller.cloudHandoff.reset.mockClear()
 		const fetch = vi.fn<Parameters<typeof mockFetchForTesting>[0]>(async () =>
 			Response.json({ data: [{ id: 1, name: "project", html_url: repoUrl }] }),
 		)
 		return { controller, cloud, identity, fetch }
 	}
+
+	it.each(["account", "organization"])("replaces the cached handoff controller after an observed %s change", async (change) => {
+		const { controller, cloud, identity, fetch } = setup()
+		await mockFetchForTesting(fetch, async () => {
+			await cloud.prepareHandoffRepository(repoUrl)
+			if (change === "account") identity.accountId = "user-2"
+			else identity.organizationId = "org-2"
+			const replacement = SdkController.prototype["getHandoffCloud"].call(controller as never)
+			try {
+				await expect(replacement.prepareHandoffRepository(repoUrl)).resolves.toEqual(
+					identity.organizationId ? { organizationId: identity.organizationId } : {},
+				)
+				await expect(cloud.prepareHandoffRepository(repoUrl)).rejects.toThrow()
+			} finally {
+				await replacement.dispose()
+			}
+		})
+		expect(fetch).toHaveBeenCalledTimes(2)
+	})
+
+	it.each([
+		true,
+		false,
+	])("admits a new handoff after an account change with prior state projection: %s", async (projectState) => {
+		const { controller, cloud, identity } = setup()
+		const capture = vi.fn(async () => {
+			throw new Error("Repository unavailable")
+		})
+		const handoff = new SdkCloudHandoffCoordinator({
+			capture,
+			getCloud: () => SdkController.prototype["getHandoffCloud"].call(controller as never),
+			getAccount: () => controller.getHandoffAccount(),
+			assertEnabled: () => {},
+			changed: async () => {},
+		})
+		controller.cloudHandoff.reset.mockImplementation(() => handoff.reset())
+		const input = { sourceTaskId: "local-task", instruction: "Continue", files: [], images: [] }
+		await handoff.prepare(input)
+		expect(handoff.viewFor(input.sourceTaskId)).toMatchObject({ phase: "failed", message: "Repository unavailable" })
+		identity.accountId = "user-2"
+		if (projectState) expect(handoff.viewFor(input.sourceTaskId)).toBeUndefined()
+		await handoff.prepare(input)
+		expect(capture).toHaveBeenCalledTimes(2)
+		expect(handoff.viewFor(input.sourceTaskId)).toMatchObject({ phase: "failed", message: "Repository unavailable" })
+		expect(controller.cloudHandoff.reset).toHaveBeenCalledOnce()
+		await cloud.dispose()
+	})
+
+	it("preserves the controller across same-account token rotation and temporary auth unavailability", async () => {
+		const { controller, cloud, identity, fetch } = setup()
+		controller.authService.getAuthToken.mockResolvedValue("workos:rotated-token")
+		identity.accountId = ""
+		expect(controller.getHandoffAccount()).toBeUndefined()
+		expect(() => SdkController.prototype["getHandoffCloud"].call(controller as never)).toThrow("Sign in")
+		identity.accountId = "user-1"
+		expect(SdkController.prototype["getHandoffCloud"].call(controller as never)).toBe(cloud)
+		await mockFetchForTesting(fetch, async () => {
+			await cloud.prepareHandoffRepository(repoUrl)
+		})
+		expect(fetch).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer workos:rotated-token" }) }),
+		)
+		expect(controller.cloudHandoff.reset).not.toHaveBeenCalled()
+		await cloud.dispose()
+	})
 
 	it.each([
 		null,
@@ -1111,8 +1189,12 @@ describe("cloud handoff controller", () => {
 		await cloud.dispose()
 	})
 
-	it.each(["account change", "disposal"])("invalidates an organization lookup during %s", async (reason) => {
-		const { controller, cloud, fetch } = setup()
+	it.each([
+		"account change",
+		"observed account change",
+		"disposal",
+	])("invalidates an organization lookup during %s", async (reason) => {
+		const { controller, cloud, identity, fetch } = setup()
 		const organizations = Promise.withResolvers<Array<{ active: boolean; organizationId: string }>>()
 		controller.accountService.fetchUserOrganizationsRPC.mockReturnValueOnce(organizations.promise)
 		await mockFetchForTesting(fetch, async () => {
@@ -1120,6 +1202,9 @@ describe("cloud handoff controller", () => {
 			await vi.waitFor(() => expect(controller.accountService.fetchUserOrganizationsRPC).toHaveBeenCalledOnce())
 			if (reason === "account change") {
 				await SdkController.prototype["changeHandoffAccount"].call(controller as never, async () => {})
+			} else if (reason === "observed account change") {
+				identity.accountId = "user-2"
+				controller.getHandoffAccount()
 			} else {
 				await SdkController.prototype.dispose.call(controller as never)
 			}
