@@ -30,8 +30,8 @@ afterEach(() => {
 });
 
 describe("app icon", () => {
-	it("defaults to the bundled midnight icon and validates stored values", () => {
-		expect(DEFAULT_APP_ICON).toBe("midnight");
+	it("defaults to the bundled classic icon and validates stored values", () => {
+		expect(DEFAULT_APP_ICON).toBe("classic");
 		expect(readStoredAppIcon()).toBe(DEFAULT_APP_ICON);
 		window.localStorage.setItem(APP_ICON_STORAGE_KEY, "bogus");
 		expect(readStoredAppIcon()).toBe(DEFAULT_APP_ICON);
@@ -55,7 +55,7 @@ describe("app icon", () => {
 
 	it.each([
 		["sunrise", "hologram"],
-		["steel", "midnight"],
+		["steel", "classic"],
 	])("migrates the retired %s preference to %s", (retired, replacement) => {
 		window.localStorage.setItem(APP_ICON_STORAGE_KEY, retired);
 
