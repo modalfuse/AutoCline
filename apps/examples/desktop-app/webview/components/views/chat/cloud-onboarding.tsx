@@ -8,7 +8,6 @@ import {
 	GitBranch,
 	Github,
 	LoaderCircle,
-	LogIn,
 	RefreshCcw,
 	ShieldCheck,
 	Sparkles,
@@ -18,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export type CloudOnboardingVariant =
-	| "signed_out"
 	| "not_connected"
 	| "no_repositories"
 	| "error";
@@ -27,19 +25,11 @@ export function CloudOnboardingCard({
 	variant,
 	onConnect,
 	onRefresh,
-	onSignIn,
-	onCancelSignIn,
-	cancelling = false,
-	signingIn = false,
 	checking = false,
 }: {
 	variant: CloudOnboardingVariant;
 	onConnect: () => void;
 	onRefresh: () => void;
-	onSignIn?: () => void;
-	onCancelSignIn?: () => void;
-	cancelling?: boolean;
-	signingIn?: boolean;
 	checking?: boolean;
 }) {
 	if (variant === "error") {
@@ -68,7 +58,6 @@ export function CloudOnboardingCard({
 		);
 	}
 
-	const isSignedOut = variant === "signed_out";
 	const isNoRepositories = variant === "no_repositories";
 
 	return (
@@ -80,13 +69,11 @@ export function CloudOnboardingCard({
 							<Sparkles aria-hidden="true" className="size-3" />
 							Cloud sessions
 						</p>
-						<h2 className="mt-3 text-lg font-semibold text-foreground">
-							{isSignedOut
-								? "Run Cline in the cloud"
-								: isNoRepositories
-									? "Give Cline access to a repository"
-									: "Connect GitHub to get started"}
-						</h2>
+					<h2 className="mt-3 text-lg font-semibold text-foreground">
+						{isNoRepositories
+							? "Give Cline access to a repository"
+							: "Connect GitHub to get started"}
+					</h2>
 						<p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">
 							Cloud sessions run on secure, isolated sandboxes on Cline's
 							infrastructure. Cline clones your repository, works on a branch,
@@ -97,26 +84,16 @@ export function CloudOnboardingCard({
 					<CloudFlowIllustration className="shrink-0 max-[720px]:self-center" />
 				</div>
 
-				<ol className="grid grid-cols-3 gap-3 max-[720px]:grid-cols-1">
-					{isSignedOut ? (
-						<OnboardingStep
-							icon={<LogIn aria-hidden="true" className="size-4" />}
-							index={1}
-							title="Sign in with Cline"
-						>
-							Cloud sessions are part of your Cline account.
-						</OnboardingStep>
-					) : (
-						<OnboardingStep
-							done={isNoRepositories}
-							icon={<Github aria-hidden="true" className="size-4" />}
-							index={1}
-							title="Connect GitHub"
-						>
-							Link your GitHub account from the Cline dashboard.
-						</OnboardingStep>
-					)}
-					<OnboardingStep
+			<ol className="grid grid-cols-3 gap-3 max-[720px]:grid-cols-1">
+				<OnboardingStep
+					done={isNoRepositories}
+					icon={<Github aria-hidden="true" className="size-4" />}
+					index={1}
+					title="Connect GitHub"
+				>
+					Link your GitHub account from the Cline dashboard.
+				</OnboardingStep>
+				<OnboardingStep
 						active={isNoRepositories}
 						icon={<ShieldCheck aria-hidden="true" className="size-4" />}
 						index={2}
@@ -134,58 +111,35 @@ export function CloudOnboardingCard({
 					</OnboardingStep>
 				</ol>
 
-				<div className="flex flex-wrap items-center gap-3">
-					{isSignedOut ? (
-						<>
-							<Button disabled={signingIn} onClick={onSignIn} size="sm">
-								<LogIn aria-hidden="true" className="size-3.5" />
-								{signingIn ? "Waiting for browser…" : "Sign in with Cline"}
-							</Button>
-							{signingIn && onCancelSignIn && (
-								<Button
-									disabled={cancelling}
-									onClick={onCancelSignIn}
-									size="sm"
-									variant="ghost"
-								>
-									Cancel
-								</Button>
-							)}
-						</>
-					) : (
-						<Button onClick={onConnect} size="sm">
-							<Github aria-hidden="true" className="size-3.5" />
-							{isNoRepositories ? "Manage repository access" : "Connect GitHub"}
-							<ExternalLink aria-hidden="true" className="size-3" />
-						</Button>
-					)}
-					{isSignedOut ? null : (
-						<Button
-							disabled={checking}
-							onClick={onRefresh}
-							size="sm"
-							variant="ghost"
-						>
-							<RefreshCcw
-								aria-hidden="true"
-								className={cn("size-3.5", checking && "animate-spin")}
-							/>
-							{isNoRepositories ? "Check again" : "I've connected GitHub"}
-						</Button>
-					)}
-					{isSignedOut ? null : (
-						<span
-							aria-live="polite"
-							className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
-						>
-							<LoaderCircle
-								aria-hidden="true"
-								className="size-3 animate-spin motion-reduce:animate-none"
-							/>
-							Watching for changes — this updates automatically.
-						</span>
-					)}
-				</div>
+			<div className="flex flex-wrap items-center gap-3">
+				<Button onClick={onConnect} size="sm">
+					<Github aria-hidden="true" className="size-3.5" />
+					{isNoRepositories ? "Manage repository access" : "Connect GitHub"}
+					<ExternalLink aria-hidden="true" className="size-3" />
+				</Button>
+				<Button
+					disabled={checking}
+					onClick={onRefresh}
+					size="sm"
+					variant="ghost"
+				>
+					<RefreshCcw
+						aria-hidden="true"
+						className={cn("size-3.5", checking && "animate-spin")}
+					/>
+					{isNoRepositories ? "Check again" : "I've connected GitHub"}
+				</Button>
+				<span
+					aria-live="polite"
+					className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+				>
+					<LoaderCircle
+						aria-hidden="true"
+						className="size-3 animate-spin motion-reduce:animate-none"
+					/>
+					Watching for changes — this updates automatically.
+				</span>
+			</div>
 			</div>
 		</div>
 	);

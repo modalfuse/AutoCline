@@ -10,7 +10,6 @@ import {
 	Github,
 	Info,
 	LoaderCircle,
-	LogIn,
 	Plus,
 	RefreshCcw,
 	Search,
@@ -1009,9 +1008,9 @@ export function WelcomeWorkspaceControls({
 	) => Promise<CloudBranchListResult>;
 	onOpenExternalUrl: (url: string) => Promise<void>;
 	signedIn: boolean;
-	signingIn: boolean;
+	signingIn?: boolean;
 	onRepoUrlChange: (repoUrl: string) => void;
-	onSignIn: () => void | Promise<void>;
+	onSignIn?: () => void | Promise<void>;
 	workspaceRoot: string;
 	workspaces: string[];
 	onRefreshWorkspaces: () => Promise<void>;
@@ -1099,7 +1098,7 @@ export function WelcomeWorkspaceControls({
 			ref={containerRef}
 		>
 			{cloudEnabled && executionTarget === "cloud" ? (
-				cloudControlsHidden ? null : signedIn ? (
+				cloudControlsHidden ? null : (
 					<>
 						<CloudRepositoryPicker
 							onClose={() => setOpenMenu(null)}
@@ -1136,16 +1135,6 @@ export function WelcomeWorkspaceControls({
 							repositoryId={cloudRepositoryId}
 						/>
 					</>
-				) : (
-					<Button
-						disabled={signingIn}
-						onClick={() => void onSignIn()}
-						size="sm"
-						variant="outline"
-					>
-						<LogIn className="size-3.5" />
-						{signingIn ? "Waiting for browser..." : "Sign in to use Cloud"}
-					</Button>
 				)
 			) : (
 				<>
