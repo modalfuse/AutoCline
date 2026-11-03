@@ -3,11 +3,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getInitialChatConfig } from "@/hooks/chat-session/constants";
-import {
-	EXECUTION_TARGET_STORAGE_KEY,
-	writeExecutionTargetToWindow,
-} from "@/lib/model-selection";
 import type { RemoteEnvironmentProfile } from "@/lib/remote-environments";
 import {
 	buildEnvironmentSelectorModel,
@@ -56,7 +51,6 @@ beforeEach(() => {
 afterEach(async () => {
 	await act(async () => root.unmount());
 	container.remove();
-	window.localStorage.removeItem(EXECUTION_TARGET_STORAGE_KEY);
 	vi.restoreAllMocks();
 });
 
@@ -135,7 +129,7 @@ describe("buildEnvironmentSelectorModel", () => {
 });
 
 describe("EnvironmentSelector", () => {
-	it("renders every environment tier and routes selections and host setup", async () => {
+	it("renders Local and Remote only (no Cloud) and routes selections and host setup", async () => {
 		const onSelectEnvironment = vi.fn(async () => undefined);
 		const onAddSshHost = vi.fn();
 		await act(async () => {
@@ -164,11 +158,8 @@ describe("EnvironmentSelector", () => {
 			"ubuntu@builder.example.com:2200",
 		);
 		expect(document.body.textContent).not.toContain("Connected");
-		expect(document.body.textContent).toContain("Cloud");
-		expect(document.body.textContent).toContain("Coming soon");
-		expect(menuItemContaining("Cloud").getAttribute("aria-disabled")).toBe(
-			"true",
-		);
+		expect(document.body.textContent).not.toContain("Cloud");
+		expect(document.body.textContent).not.toContain("Coming soon");
 
 		await click(menuItemContaining("Local"));
 		await vi.waitFor(() => {
@@ -182,59 +173,8 @@ describe("EnvironmentSelector", () => {
 		expect(addHost).not.toBeNull();
 		expect(addHost?.textContent?.trim()).toBe("");
 		expect(addHost?.parentElement?.textContent).toContain("Remote");
-		expect(document.body.textContent?.indexOf("Cloud")).toBeLessThan(
-			document.body.textContent?.indexOf("Remote") ?? 0,
-		);
 		await click(addHost as HTMLElement);
 		expect(onAddSshHost).toHaveBeenCalledTimes(1);
-	});
-
-	it("selects Cloud from the environment menu when enabled", async () => {
-		const onSelectExecutionTarget = vi.fn();
-		const onSelectEnvironment = vi.fn();
-		await act(async () =>
-			root.render(
-				<EnvironmentSelector
-					activeEnvironmentId="local"
-					cloudEnabled
-					onSelectExecutionTarget={onSelectExecutionTarget}
-					onSelectEnvironment={onSelectEnvironment}
-					onAddSshHost={vi.fn()}
-					profiles={profiles}
-				/>,
-			),
-		);
-		await pointerDown(trigger());
-		expect(document.body.textContent).not.toContain("Coming soon");
-		await click(menuItemContaining("Cloud"));
-		expect(onSelectExecutionTarget).toHaveBeenCalledExactlyOnceWith("cloud");
-		expect(onSelectEnvironment).not.toHaveBeenCalled();
-	});
-
-	it("remembers an explicit Local pick after Cloud falls back to Local", async () => {
-		writeExecutionTargetToWindow("cloud");
-		const onSelectExecutionTarget = vi.fn(writeExecutionTargetToWindow);
-		const onSelectEnvironment = vi.fn();
-		await act(async () =>
-			root.render(
-				<EnvironmentSelector
-					activeEnvironmentId="local"
-					executionTarget="local"
-					cloudEnabled={false}
-					onSelectExecutionTarget={onSelectExecutionTarget}
-					onSelectEnvironment={onSelectEnvironment}
-					onAddSshHost={vi.fn()}
-					profiles={profiles}
-				/>,
-			),
-		);
-		// Displaying the automatic fallback alone preserves the saved preference.
-		expect(getInitialChatConfig("local").executionTarget).toBe("cloud");
-		await pointerDown(trigger());
-		await click(menuItemContaining("Local"));
-		expect(onSelectExecutionTarget).toHaveBeenCalledExactlyOnceWith("local");
-		expect(onSelectEnvironment).not.toHaveBeenCalled();
-		expect(getInitialChatConfig("local").executionTarget).toBe("local");
 	});
 
 	it("picking Local from an SSH host also selects the local execution target", async () => {
@@ -245,7 +185,6 @@ describe("EnvironmentSelector", () => {
 				<EnvironmentSelector
 					activeEnvironmentId="pi-server"
 					executionTarget="local"
-					cloudEnabled
 					onSelectExecutionTarget={onSelectExecutionTarget}
 					onSelectEnvironment={onSelectEnvironment}
 					onAddSshHost={vi.fn()}
@@ -255,7 +194,7 @@ describe("EnvironmentSelector", () => {
 		);
 		await pointerDown(trigger());
 		await click(menuItemContaining("Build box"));
-		// Another SSH host is not a Cloud/Local decision.
+		// Another SSH host is not a Local decision.
 		expect(onSelectExecutionTarget).not.toHaveBeenCalled();
 		expect(onSelectEnvironment).toHaveBeenCalledExactlyOnceWith("build-box");
 
@@ -265,59 +204,7 @@ describe("EnvironmentSelector", () => {
 		expect(onSelectEnvironment).toHaveBeenLastCalledWith("local");
 	});
 
-	it.each([
-		["Local", "local"],
-		["Build box", "build-box"],
-	])("switches from Cloud to %s without leaving Cloud selected", async (label, environmentId) => {
-		const onSelectExecutionTarget = vi.fn();
-		const onSelectEnvironment = vi.fn();
-		await act(async () =>
-			root.render(
-				<EnvironmentSelector
-					activeEnvironmentId="local"
-					executionTarget="cloud"
-					cloudEnabled
-					onSelectExecutionTarget={onSelectExecutionTarget}
-					onSelectEnvironment={onSelectEnvironment}
-					onAddSshHost={vi.fn()}
-					profiles={profiles}
-				/>,
-			),
-		);
-		expect(trigger().title).toBe("Environment: Cloud");
-		await pointerDown(trigger());
-		expect(menuItemContaining("Cloud").getAttribute("aria-current")).toBe(
-			"true",
-		);
-		expect(menuItemContaining("Local").hasAttribute("aria-current")).toBe(
-			false,
-		);
-		await click(menuItemContaining(label));
-		expect(onSelectExecutionTarget).toHaveBeenCalledExactlyOnceWith("local");
-		if (environmentId === "local")
-			expect(onSelectEnvironment).not.toHaveBeenCalled();
-		else
-			expect(onSelectEnvironment).toHaveBeenCalledExactlyOnceWith(
-				environmentId,
-			);
-	});
-
-	it.each([
-		{
-			activeEnvironmentId: "pi-server",
-			executionTarget: "local" as const,
-			choice: "Local",
-		},
-		{
-			activeEnvironmentId: "local",
-			executionTarget: "cloud" as const,
-			choice: "Build box",
-		},
-	])("keeps the target unchanged when switching from $activeEnvironmentId to $choice fails", async ({
-		activeEnvironmentId,
-		executionTarget,
-		choice,
-	}) => {
+	it("keeps the target unchanged when switching environments fails", async () => {
 		let rejectSwitch!: (error: Error) => void;
 		const onSelectEnvironment = vi.fn(
 			() =>
@@ -329,9 +216,8 @@ describe("EnvironmentSelector", () => {
 		await act(async () =>
 			root.render(
 				<EnvironmentSelector
-					activeEnvironmentId={activeEnvironmentId}
-					executionTarget={executionTarget}
-					cloudEnabled
+					activeEnvironmentId="pi-server"
+					executionTarget="local"
 					profiles={profiles}
 					onAddSshHost={vi.fn()}
 					onSelectEnvironment={onSelectEnvironment}
@@ -340,11 +226,11 @@ describe("EnvironmentSelector", () => {
 			),
 		);
 		await pointerDown(trigger());
-		await click(menuItemContaining(choice));
+		await click(menuItemContaining("Local"));
 		expect(onSelectExecutionTarget).not.toHaveBeenCalled();
 		await act(async () => rejectSwitch(new Error("switch failed")));
 		expect(onSelectExecutionTarget).not.toHaveBeenCalled();
-		expect(menuItemContaining(choice)).toBeDefined();
+		expect(menuItemContaining("Local")).toBeDefined();
 		expect(trigger().disabled).toBe(false);
 	});
 
