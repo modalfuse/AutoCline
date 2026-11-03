@@ -5,7 +5,7 @@ export const APP_ICON_STORAGE_KEY = "cline.code.app-icon.v1";
 /**
  * Bundled Dock/taskbar icon variants (assets under webview/public/app-icons
  * and src-tauri/icons/app). Settings no longer exposes a picker; AutoCline
- * always applies DEFAULT_APP_ICON ("midnight") at launch via syncAppIcon.
+ * always applies DEFAULT_APP_ICON ("classic") at launch via syncAppIcon.
  */
 export const APP_ICONS = [
 	{ id: "classic", label: "Classic" },
