@@ -3,24 +3,26 @@ import { desktopClient, isTauriAvailable } from "@/lib/desktop-client";
 export const APP_ICON_STORAGE_KEY = "cline.code.app-icon.v1";
 
 /**
- * Bundled Dock/taskbar icon variants (assets under webview/public/app-icons
- * and src-tauri/icons/app). Settings no longer exposes a picker; AutoCline
- * always applies DEFAULT_APP_ICON ("midnight") at launch via syncAppIcon.
+ * AutoCline uses a fixed custom brand icon, not theme-switchable variants.
+ * The runtime icon switching (classic/midnight/hologram/chip) is disabled;
+ * Dock/About/bundle always show the custom autocline-brand-icon.png.
+ * Kept for compatibility but never applied at runtime.
  */
 export const APP_ICONS = [
-	{ id: "classic", label: "Classic" },
-	{ id: "midnight", label: "Midnight" },
-	{ id: "hologram", label: "Hologram" },
-	{ id: "chip", label: "Chip" },
+	{ id: "custom", label: "AutoCline" },
 ] as const;
 
 export type AppIconId = (typeof APP_ICONS)[number]["id"];
 
-export const DEFAULT_APP_ICON: AppIconId = "classic";
+export const DEFAULT_APP_ICON: AppIconId = "custom";
 
 const RETIRED_APP_ICON_MIGRATIONS = {
-	sunrise: "hologram",
+	sunrise: DEFAULT_APP_ICON,
 	steel: DEFAULT_APP_ICON,
+	classic: DEFAULT_APP_ICON,
+	midnight: DEFAULT_APP_ICON,
+	hologram: DEFAULT_APP_ICON,
+	chip: DEFAULT_APP_ICON,
 } as const satisfies Record<string, AppIconId>;
 
 type RetiredAppIconId = keyof typeof RETIRED_APP_ICON_MIGRATIONS;
@@ -94,15 +96,15 @@ export async function setStoredAppIcon(icon: AppIconId): Promise<void> {
 }
 
 /**
- * Keeps the Dock/taskbar on the bundled AutoCline default icon. Settings no
- * longer offers an icon picker; clear any leftover Classic/Midnight/Hologram/
- * Chip preference so older builds cannot resurrect a non-default Dock icon.
+ * No-op for AutoCline: the custom brand icon is baked into the native bundle
+ * (icon.icns) and never switched at runtime. Clear any leftover Cline theme
+ * preference so the Dock cannot be overwritten by old localStorage entries.
  */
 export async function syncAppIcon(): Promise<void> {
 	try {
 		window.localStorage.removeItem(APP_ICON_STORAGE_KEY);
 	} catch {
-		// Storage may be unavailable; still apply the bundled default below.
+		// Storage may be unavailable; no-op is safe.
 	}
-	await applyAppIcon(DEFAULT_APP_ICON);
+	// Do NOT call applyAppIcon: AutoCline's icon is fixed in the native bundle.
 }
