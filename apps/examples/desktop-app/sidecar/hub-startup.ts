@@ -5,7 +5,17 @@ export type HubStartupStatus = DesktopHubStatus;
 const HUB_STARTUP_TIMEOUT_MS = 30_000;
 
 /** Commands the startup screen needs before the Hub is ready. */
-const HUB_INDEPENDENT_COMMANDS = new Set(["retry_hub", "export_diagnostics"]);
+const HUB_INDEPENDENT_COMMANDS = new Set([
+	"retry_hub",
+	"export_diagnostics",
+	// AutoCline REMOTE talks to the Tailscale Hub; do not block on local Hub bring-up.
+	"list_remote_environments",
+	"upsert_remote_environment",
+	"test_remote_environment",
+	"connect_remote_environment",
+	"disconnect_remote_environment",
+	"delete_remote_environment",
+]);
 
 export function isHubIndependentCommand(command: string): boolean {
 	return HUB_INDEPENDENT_COMMANDS.has(command);

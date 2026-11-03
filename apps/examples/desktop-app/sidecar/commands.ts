@@ -37,6 +37,7 @@ import {
 	type ClineAccountUser,
 	clearAccountTelemetryIdentity,
 	createConfiguredStreamingTranscriptionSession,
+	clearPrivateModelsCatalogCache,
 	createHubProvidersApi,
 	createUserInstructionConfigService,
 	executeClineAccountAction,
@@ -3213,9 +3214,15 @@ export async function handleCommand(
 		);
 	}
 	if (command === "list_provider_models") {
+		const providerId = String(args?.provider ?? "").trim();
+		// AutoCline: LiteLLM labels/route list change with the home router — never
+		// serve a stale private catalog that still has Vendor- prefixes / duplicates.
+		if (providerId === "litellm") {
+			clearPrivateModelsCatalogCache();
+		}
 		const providers = createHubProvidersApi(await ensureSharedHubClient(ctx));
 		return await providers.listModels({
-			providerId: String(args?.provider ?? "").trim(),
+			providerId,
 		});
 	}
 	if (command === "list_cline_recommended_models") {

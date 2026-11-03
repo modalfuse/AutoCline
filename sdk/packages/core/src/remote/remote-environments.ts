@@ -162,6 +162,14 @@ interface PendingHubCleanup {
 	discoveryPath: string;
 }
 
+interface SharedHubCredential {
+	endpoint: string;
+	authToken: string;
+	home: string;
+	platform: RemoteInspection["platform"];
+	arch: RemoteInspection["arch"];
+}
+
 interface ManagedConnection {
 	/**
 	 * Present only when this client started a private remote Hub. Direct
@@ -266,6 +274,12 @@ export class RemoteEnvironmentService {
 	) => void;
 	private readonly statuses = new Map<string, RemoteEnvironmentStatus>();
 	private readonly connections = new Map<string, ManagedConnection>();
+	/** Auth for durable hubUrls Hubs — skip SSH on reconnect when still valid. */
+	private readonly sharedHubCredentialCache = new Map<
+		string,
+		SharedHubCredential
+	>();
+	private sharedHubCredentialHydrated = false;
 	private activeProfileId: string | undefined;
 	private mutationTail: Promise<void> = Promise.resolve();
 
@@ -418,12 +432,6 @@ export class RemoteEnvironmentService {
 
 		this.setStatus(id, "connecting", "Connecting to remote environment");
 		try {
-			const inspection = await this.inspectRemote(profile);
-			await this.validateDirectory(profile, inspection.home);
-			// Ensure a helper exists for SSH helper-path checks / legacy cleanup
-			// retries; shared Hub connect does not start a private hub with it.
-			await this.ensureHelper(profile, inspection);
-
 			const hubUrls = resolveRemoteHubUrls(profile);
 			if (hubUrls.length === 0) {
 				throw new Error(
@@ -431,14 +439,60 @@ export class RemoteEnvironmentService {
 						'(for example ws://100.101.163.69:25463/hub) and never opens an SSH tunnel; add "hubUrls" to the profile.',
 				);
 			}
-			// The first configured URL is the stable endpoint this session uses.
-			// The connection only claims success once that Hub answers, so a
-			// reachable SSH host with an unreachable Hub fails loudly instead of
-			// silently degrading.
 			const endpoint = hubUrls[0] as string;
-			// Direct Hub mode: authenticate against the durable Hub already listening
-			// at hubUrls. A private `hub ensure --port 0` publishes a different
-			// authToken that cannot open that endpoint; do not start or stop one.
+
+			await this.hydrateSharedHubCredentials();
+			// Fast path: reuse a verified shared-Hub token — no SSH round-trips.
+			const cached = this.sharedHubCredentialCache.get(id);
+			if (
+				cached &&
+				cached.endpoint === endpoint &&
+				(await this.dependencies.verifyHubConnection(
+					endpoint,
+					cached.authToken,
+				))
+			) {
+				const connectedAt = this.dependencies.now().toISOString();
+				const connection: RemoteEnvironmentConnection = {
+					profile: { ...profile },
+					profileId: id,
+					state: "connected",
+					endpoint,
+					authToken: cached.authToken,
+					workspaceRoot: cached.home,
+					homeDir: cached.home,
+					platform: cached.platform,
+					arch: cached.arch,
+					remoteHubUrl: `ws://127.0.0.1:${hubUrlPort(endpoint) || 25463}/hub`,
+					localPort: hubUrlPort(endpoint),
+					connectedAt,
+				};
+				const managed: ManagedConnection = {
+					connection,
+					ownsRemoteHub: false,
+				};
+				this.connections.set(id, managed);
+				this.activeProfileId = id;
+				this.setStatus(id, "connected", "Connected", {
+					platform: cached.platform,
+					arch: cached.arch,
+					home: cached.home,
+				});
+				if (previousManaged && previousManaged !== managed) {
+					const sameHub =
+						previousManaged.connection.authToken === connection.authToken &&
+						previousManaged.connection.endpoint === connection.endpoint;
+					if (!sameHub) {
+						await this.stopManagedHub(previousManaged);
+					}
+				}
+				return { ...connection, profile: { ...connection.profile } };
+			}
+
+			// hubUrls mode: no helper ensure. Skip validateDirectory — inspect already
+			// returned $HOME, which always exists. Two SSH calls remain (inspect +
+			// auth lookup); reconnects hit the disk/memory credential cache above.
+			const inspection = await this.inspectRemote(profile);
 			const hub = await this.resolveSharedRemoteHub(
 				profile,
 				inspection.home,
@@ -452,6 +506,14 @@ export class RemoteEnvironmentService {
 					`could not connect to ${endpoint}${hubUrls.length > 1 ? ` (also configured: ${hubUrls.slice(1).join(", ")})` : ""}`,
 				);
 			}
+
+			await this.rememberSharedHubCredential(id, {
+				endpoint,
+				authToken: hub.authToken,
+				home: inspection.home,
+				platform: inspection.platform,
+				arch: inspection.arch,
+			});
 
 			const connectedAt = this.dependencies.now().toISOString();
 			const connection: RemoteEnvironmentConnection = {
@@ -763,6 +825,80 @@ export class RemoteEnvironmentService {
 	 * Reads the auth token of the durable Hub already listening at `endpoint`
 	 * from the remote host's discovery records. Does not start or stop a Hub.
 	 */
+	private sharedHubCredentialsPath(): string {
+		return `${this.profilesPath}.shared-hub-credentials.json`;
+	}
+
+	private async hydrateSharedHubCredentials(): Promise<void> {
+		if (this.sharedHubCredentialHydrated) {
+			return;
+		}
+		this.sharedHubCredentialHydrated = true;
+		try {
+			const raw = await readFile(this.sharedHubCredentialsPath(), "utf8");
+			const parsed: unknown = JSON.parse(raw);
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+				return;
+			}
+			for (const [id, value] of Object.entries(
+				parsed as Record<string, unknown>,
+			)) {
+				if (!value || typeof value !== "object" || Array.isArray(value)) {
+					continue;
+				}
+				const record = value as Record<string, unknown>;
+				const endpoint =
+					typeof record.endpoint === "string" ? record.endpoint.trim() : "";
+				const authToken =
+					typeof record.authToken === "string" ? record.authToken : "";
+				const home = typeof record.home === "string" ? record.home : "";
+				const platform = normalizePlatform(
+					typeof record.platform === "string" ? record.platform : "",
+				);
+				const arch = normalizeArch(
+					typeof record.arch === "string" ? record.arch : "",
+				);
+				if (!endpoint || !authToken || !home || !platform || !arch) {
+					continue;
+				}
+				this.sharedHubCredentialCache.set(id, {
+					endpoint,
+					authToken,
+					home,
+					platform,
+					arch,
+				});
+			}
+		} catch (error) {
+			if (isNodeError(error) && error.code === "ENOENT") {
+				return;
+			}
+			// Corrupt cache must not block connect; fall through to SSH discovery.
+		}
+	}
+
+	private async rememberSharedHubCredential(
+		id: string,
+		credential: SharedHubCredential,
+	): Promise<void> {
+		this.sharedHubCredentialCache.set(id, credential);
+		const payload: Record<string, SharedHubCredential> = Object.fromEntries(
+			this.sharedHubCredentialCache,
+		);
+		const path = this.sharedHubCredentialsPath();
+		const directory = dirname(path);
+		await mkdir(directory, { recursive: true, mode: 0o700 });
+		const temporary = `${path}.${this.dependencies.randomId()}.tmp`;
+		try {
+			await writeFile(temporary, `${JSON.stringify(payload, null, 2)}\n`, {
+				mode: 0o600,
+			});
+			await rename(temporary, path);
+		} finally {
+			await rm(temporary, { force: true });
+		}
+	}
+
 	private async resolveSharedRemoteHub(
 		profile: RemoteEnvironmentProfile,
 		home: string,

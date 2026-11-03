@@ -511,7 +511,7 @@ describe("RemoteEnvironmentService", () => {
 			"remote-secret",
 		);
 
-		// AutoCline must never SSH-cat the helper; reuse an on-host binary instead.
+		// hubUrls mode never uploads or links a helper — only inspect + auth lookup.
 		expect(
 			invocations.some((invocation) => invocation.options.inputFile),
 		).toBe(false);
@@ -520,15 +520,11 @@ describe("RemoteEnvironmentService", () => {
 				(invocation.args.at(-1) ?? "").includes("umask 077; cat >"),
 			),
 		).toBe(false);
-		const link = invocations.find((invocation) =>
-			(invocation.args.at(-1) ?? "").includes("'ln' '-sfn'"),
-		);
-		expect(link?.args.at(-1)).toContain(
-			"cline-linux-arm64-deadbeefdeadbeef",
-		);
-		expect(link?.args.at(-1)).toContain(
-			"cline-linux-arm64-abcdef0123456789",
-		);
+		expect(
+			invocations.some((invocation) =>
+				(invocation.args.at(-1) ?? "").includes("'ln' '-sfn'"),
+			),
+		).toBe(false);
 		expect(
 			invocations.some((invocation) =>
 				invocation.args.includes("ClearAllForwardings=yes"),
@@ -687,22 +683,15 @@ describe("RemoteEnvironmentService", () => {
 		);
 	});
 
-	it("reuses a differently-hashed remote helper without uploading", async () => {
+	it("reconnects via shared Hub credential cache without SSH", async () => {
 		const invocations: Invocation[] = [];
+		const verifyHubConnection = vi.fn(async () => true);
 		const service = createService({
 			runProcess: async (executable, args, options) => {
 				invocations.push({ executable, args, options });
 				const command = args.at(-1) ?? "";
 				if (command.includes("uname -s")) {
 					return inspection("Linux", "x86_64", "/home/dev");
-				}
-				if (command.includes("'test' '-x'")) {
-					return { stdout: "", stderr: "", exitCode: 1 };
-				}
-				if (command.includes("ls -1t") && command.includes(".cline/remote")) {
-					return success(
-						"/home/dev/.cline/remote/cline-linux-x64-08d9954c9b8b79bd\n",
-					);
 				}
 				if (command.includes("python3") && command.includes("-c")) {
 					return success(
@@ -714,7 +703,7 @@ describe("RemoteEnvironmentService", () => {
 			resolveHelperBinary: async () => "/opt/cline/helper",
 			fileReadable: async () => true,
 			hashFile: async () => "0149bbee2827d5f4ffffffffffffffff",
-			verifyHubConnection: async () => true,
+			verifyHubConnection,
 		});
 		const profile = await service.upsert({
 			name: "hp02",
@@ -722,24 +711,21 @@ describe("RemoteEnvironmentService", () => {
 			hubUrls: PROFILE_HUB_URLS,
 		});
 		await service.connect(profile.id);
-		expect(invocations.some((invocation) => invocation.options.inputFile)).toBe(
-			false,
+		const sshAfterFirst = invocations.length;
+		expect(sshAfterFirst).toBeGreaterThan(0);
+		await service.disconnect(profile.id);
+
+		invocations.length = 0;
+		await service.connect(profile.id);
+		expect(invocations).toHaveLength(0);
+		expect(verifyHubConnection).toHaveBeenCalledWith(
+			"ws://100.101.163.69:25463/hub",
+			"token",
 		);
-		const lookup = invocations.find((invocation) => {
-			const remote = invocation.args.at(-1) ?? "";
-			return remote.includes("python3") && remote.includes("-c");
-		});
-		expect(lookup?.args.at(-1)).toContain("ws://100.101.163.69:25463/hub");
-		expect(
-			invocations.some((invocation) =>
-				(invocation.args.at(-1) ?? "").includes(
-					"cline-linux-x64-0149bbee2827d5f4",
-				),
-			),
-		).toBe(true);
+		expect(service.getConnection(profile.id)?.authToken).toBe("token");
 	});
 
-	it("errors without uploading when no remote helper exists", async () => {
+	it("errors when shared Hub discovery is missing without uploading a helper", async () => {
 		const invocations: Invocation[] = [];
 		const service = createService({
 			runProcess: async (executable, args, options) => {
@@ -748,10 +734,10 @@ describe("RemoteEnvironmentService", () => {
 				if (command.includes("uname -s")) {
 					return inspection("Linux", "x86_64", "/home/dev");
 				}
-				if (command.includes("'test' '-d'")) {
-					return success();
+				// Missing discovery record — python lookup fails.
+				if (command.includes("python3") && command.includes("-c")) {
+					return { stdout: "", stderr: "no hub discovery\n", exitCode: 1 };
 				}
-				// Missing exact helper, empty remote dir, and no override path.
 				return { stdout: "", stderr: "", exitCode: 1 };
 			},
 			resolveHelperBinary: async () => "/opt/cline/helper",
@@ -764,7 +750,7 @@ describe("RemoteEnvironmentService", () => {
 			hubUrls: PROFILE_HUB_URLS,
 		});
 		await expect(service.connect(profile.id)).rejects.toThrow(
-			/never uploads the helper over SSH/,
+			/Could not find a running Hub discovery record|Failed to run remote command python3/,
 		);
 		expect(invocations.some((invocation) => invocation.options.inputFile)).toBe(
 			false,

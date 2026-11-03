@@ -3,6 +3,7 @@ import {
 	checkManagedHubBuildMismatch,
 	createClineTelemetryServiceConfig,
 	ensureLoginShellPath,
+	clearPrivateModelsCatalogCache,
 	ProviderSettingsManager,
 	readGlobalSettings,
 	setHomeDirIfUnset,
@@ -92,18 +93,28 @@ async function main(desktopCliPath?: string) {
 		});
 	}
 
-	// AutoCline: seed LiteLLM on hp02 once when the user has not chosen a
-	// provider yet. Never overwrite an explicit last-used selection.
+	// AutoCline: drop stale LiteLLM private catalogs (Vendor- labels / dual rows)
+	// left over from earlier builds, then seed LiteLLM when unset or still on
+	// hidden Cline Usage-Billing / ClinePass.
 	try {
+		clearPrivateModelsCatalogCache();
 		const manager = new ProviderSettingsManager();
 		const state = manager.read();
-		if (!state.lastUsedProvider) {
+		const last = state.lastUsedProvider?.trim() || "";
+		const shouldSeed =
+			!last || last === "cline" || last === "cline-pass";
+		if (shouldSeed) {
 			const existing = manager.getProviderSettings("litellm");
 			manager.saveProviderSettings({
 				provider: "litellm",
 				baseUrl: existing?.baseUrl?.trim() || "http://100.101.163.69:4000/v1",
 				apiKey: existing?.apiKey?.trim() || "sk-autocline-local",
-				model: existing?.model?.trim() || "deepseek-chat",
+				model:
+					existing?.model?.trim() &&
+					!existing.model.trim().startsWith("gpt-") &&
+					existing.model.trim() !== "auto-coding"
+						? existing.model.trim()
+						: "deepseek-chat",
 			});
 		}
 	} catch (error) {
