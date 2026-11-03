@@ -238,7 +238,11 @@ function hubUrlPort(url: string | undefined): number {
 	}
 	try {
 		const parsed = new URL(url);
-		return parsed.port ? Number(parsed.port) : parsed.protocol === "wss:" ? 443 : 80;
+		return parsed.port
+			? Number(parsed.port)
+			: parsed.protocol === "wss:"
+				? 443
+				: 80;
 	} catch {
 		return 0;
 	}
@@ -444,7 +448,9 @@ export class RemoteEnvironmentService {
 			// reachable SSH host with an unreachable Hub fails loudly instead of
 			// silently degrading.
 			const endpoint = hubUrls[0] as string;
-			if (!(await this.dependencies.verifyHubConnection(endpoint, hub.authToken))) {
+			if (
+				!(await this.dependencies.verifyHubConnection(endpoint, hub.authToken))
+			) {
 				throw new Error(
 					`could not connect to ${endpoint}${hubUrls.length > 1 ? ` (also configured: ${hubUrls.slice(1).join(", ")})` : ""}`,
 				);
@@ -538,9 +544,7 @@ export class RemoteEnvironmentService {
 		if (!reachable) {
 			// Nothing could stop the Hub directly, so the owned remote Hub is
 			// recorded for the SSH cleanup retry instead of being forgotten.
-			await this.persistPendingCleanup(managed.cleanup).catch(
-				() => undefined,
-			);
+			await this.persistPendingCleanup(managed.cleanup).catch(() => undefined);
 			// The Hub is gone: report the loss so the UI stops showing a live
 			// session instead of a clean disconnect it never asked for.
 			const status = this.setStatus(
@@ -1549,4 +1553,3 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
-

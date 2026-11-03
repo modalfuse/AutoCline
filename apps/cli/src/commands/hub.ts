@@ -217,7 +217,11 @@ export function createHubCommand(
 			.option(
 				"--hosts <hosts>",
 				"Comma separated bind addresses; defaults to listenHosts in ~/.config/cline/hub.json",
-				(value) => value.split(",").map((host) => host.trim()).filter(Boolean),
+				(value) =>
+					value
+						.split(",")
+						.map((host) => host.trim())
+						.filter(Boolean),
 			)
 			.option(
 				"--hub-config <path>",

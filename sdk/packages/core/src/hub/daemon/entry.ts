@@ -189,8 +189,7 @@ async function main(): Promise<void> {
 		listenHosts = options.listenHosts;
 	} else if (!options.host) {
 		const listenConfig = resolveHubListenConfig({
-			defaultPort:
-				options.port ?? resolveHubEndpointOptions({}).port,
+			defaultPort: options.port ?? resolveHubEndpointOptions({}).port,
 		});
 		if (listenConfig.source !== "default") {
 			listenHosts = listenConfig.hosts;

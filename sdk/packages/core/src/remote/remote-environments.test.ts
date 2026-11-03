@@ -17,8 +17,8 @@ import {
 	type RemoteCommandResult,
 	type RemoteEnvironmentDependencies,
 	RemoteEnvironmentService,
-	resolveRemoteHubUrls,
 	type RemoteEnvironmentServiceOptions,
+	resolveRemoteHubUrls,
 	runRemoteProcess,
 } from "./remote-environments";
 
@@ -509,7 +509,10 @@ describe("RemoteEnvironmentService", () => {
 		const profile = await service.upsert({
 			name: "ARM builder",
 			host: "arm-builder",
-			hubUrls: ["ws://100.101.163.69:25463/hub", "ws://hp02.internal:25463/hub"],
+			hubUrls: [
+				"ws://100.101.163.69:25463/hub",
+				"ws://hp02.internal:25463/hub",
+			],
 		});
 
 		const [connection, concurrentConnection] = await Promise.all([
@@ -876,10 +879,7 @@ describe("RemoteEnvironmentService", () => {
 					"wss://hub.example.com/hub",
 				],
 			}),
-		).toEqual([
-			"ws://100.101.163.69:25463/hub",
-			"wss://hub.example.com/hub",
-		]);
+		).toEqual(["ws://100.101.163.69:25463/hub", "wss://hub.example.com/hub"]);
 		// The legacy single hubUrl still works and comes after hubUrls.
 		expect(
 			resolveRemoteHubUrls({

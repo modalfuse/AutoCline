@@ -538,7 +538,10 @@ export async function startHubWebSocketServer(
 	};
 	const closeServer = (): Promise<void> => beginClose().closed;
 
-	const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => {
+	const requestHandler = (
+		req: http.IncomingMessage,
+		res: http.ServerResponse,
+	) => {
 		if (!published) {
 			res.statusCode = 503;
 			res.end("Starting");

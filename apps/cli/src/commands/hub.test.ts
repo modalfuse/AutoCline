@@ -141,10 +141,9 @@ describe("createHubCommand", () => {
 		});
 
 		const { cmd, exitCode } = createCommand();
-		await cmd.parseAsync(
-			["ensure", "--hosts", "127.0.0.1, 100.101.163.69"],
-			{ from: "user" },
-		);
+		await cmd.parseAsync(["ensure", "--hosts", "127.0.0.1, 100.101.163.69"], {
+			from: "user",
+		});
 
 		expect(exitCode()).toBe(0);
 		expect(mockEnsureDetachedHubServer).toHaveBeenCalledWith(

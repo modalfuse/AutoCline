@@ -75,7 +75,9 @@ describe("validateListenHosts", () => {
 		expect(() => validateListenHosts(["127.0.0.1", "0.0.0.0"], "test")).toThrow(
 			/wildcard address/,
 		);
-		expect(() => validateListenHosts(["::"], "test")).toThrow(/wildcard address/);
+		expect(() => validateListenHosts(["::"], "test")).toThrow(
+			/wildcard address/,
+		);
 	});
 
 	it("rejects an empty list and URLs passed as hosts", () => {
@@ -196,6 +198,8 @@ describe("resolveHubListenConfig", () => {
 
 describe("buildHubListenUrls", () => {
 	it("brackets IPv6 literals", () => {
-		expect(buildHubListenUrls(["::1"], 25463)).toEqual(["ws://[::1]:25463/hub"]);
+		expect(buildHubListenUrls(["::1"], 25463)).toEqual([
+			"ws://[::1]:25463/hub",
+		]);
 	});
 });

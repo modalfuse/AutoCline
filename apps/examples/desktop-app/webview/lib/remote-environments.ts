@@ -101,9 +101,7 @@ export function createRemoteEnvironmentDraft(
 		identityFile: profile?.identityFile,
 		// Hub URLs drive the only Hub connection path (no SSH tunnel), so an edit
 		// draft must carry them or saving would silently unpair the profile.
-		...(profile?.hubUrls?.length
-			? { hubUrls: [...profile.hubUrls] }
-			: {}),
+		...(profile?.hubUrls?.length ? { hubUrls: [...profile.hubUrls] } : {}),
 		...(profile?.hubUrl ? { hubUrl: profile.hubUrl } : {}),
 	};
 }
@@ -140,8 +138,10 @@ export function validateRemoteEnvironmentProfile(
 	if (!profile.host.trim()) return "SSH host is required.";
 	// AutoCline only connects to a Hub directly, so at least one Hub URL is
 	// required; an SSH host alone would have nothing to dial.
-	if ((profile.hubUrls ?? []).filter((url) => url.trim()).length === 0 &&
-		!profile.hubUrl?.trim()) {
+	if (
+		(profile.hubUrls ?? []).filter((url) => url.trim()).length === 0 &&
+		!profile.hubUrl?.trim()
+	) {
 		return "At least one Hub URL is required (for example ws://100.101.163.69:25463/hub).";
 	}
 	if (

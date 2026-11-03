@@ -171,10 +171,7 @@ export function parseHubConfig(
  * narrowing to loopback would leave operators believing the Hub listens on the
  * Tailscale address they asked for.
  */
-export function validateListenHosts(
-	hosts: string[],
-	source: string,
-): string[] {
+export function validateListenHosts(hosts: string[], source: string): string[] {
 	const trimmed = hosts.map((host) => host.trim()).filter(Boolean);
 	if (trimmed.length === 0) {
 		throw new Error(

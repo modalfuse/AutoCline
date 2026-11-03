@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
-import type { HubWebSocketServerOptions } from "./hub-server-options";
 import { describe, expect, it } from "vitest";
+import type { HubWebSocketServerOptions } from "./hub-server-options";
 import { startHubWebSocketServer } from "./hub-websocket-server";
 
 // The schedule handlers are never invoked by these asserts; binding is the

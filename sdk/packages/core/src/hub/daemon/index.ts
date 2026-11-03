@@ -134,10 +134,7 @@ function endpointArgs(endpoint: DetachedHubOptions): string[] {
 		...(endpoint.pathname ? ["--pathname", endpoint.pathname] : []),
 		// Repeated flags keep the config order, which decides which address is
 		// the primary one in the discovery record.
-		...(endpoint.listenHosts ?? []).flatMap((host) => [
-			"--listen-host",
-			host,
-		]),
+		...(endpoint.listenHosts ?? []).flatMap((host) => ["--listen-host", host]),
 	];
 }
 
