@@ -522,7 +522,7 @@ describe("@cline/ui theme contract", () => {
 	] as const)("matches Mermaid fallbacks to the %s semantic colors", (selector, mode) => {
 		const values = themeValues(selector);
 		for (const [mermaidToken, themeToken] of [
-			["background", "card-surface"],
+			["background", "card"],
 			["border", "border"],
 			["error", "error-text"],
 			["foreground", "foreground"],

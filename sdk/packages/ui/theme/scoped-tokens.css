@@ -354,7 +354,6 @@
 	--brand-magenta: oklch(0.75 0.15 330);
 	--brand-periwinkle: oklch(0.69 0.14 275);
 	--brand-cyan: oklch(0.87 0.07 210);
-	/* Opaque surface for chat bubbles, diagrams, and raster exports. */
 	--card-surface: color-mix(in srgb, var(--neutral-2) 50%, var(--neutral-3));
 	/* Solid roles choose brand steps that support white labels. */
 	--primary: var(--accent-9);
@@ -495,9 +494,7 @@
 	/* Standard shadcn semantic surfaces. */
 	--background: var(--surface-1);
 	--foreground: var(--text-1);
-	/* Translucent cards inherit their backing surface; use --card-surface
-	 * whenever a consumer requires an opaque color. */
-	--card: color-mix(in srgb, var(--neutral-a1), var(--neutral-a2));
+	--card: var(--surface-2);
 	--card-foreground: var(--text-1);
 	--popover: var(--surface-2);
 	--popover-foreground: var(--text-1);

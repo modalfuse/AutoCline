@@ -509,7 +509,7 @@ function useMermaidTheme(
 			setTheme((current) => (current?.key === next.key ? current : next));
 		};
 		update();
-		return observeThemeChanges(update, elementRef.current ?? undefined);
+		return observeThemeChanges(update);
 	}, [elementRef]);
 	return theme;
 }
