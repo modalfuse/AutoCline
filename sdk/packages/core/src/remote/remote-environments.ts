@@ -399,6 +399,7 @@ export class RemoteEnvironmentService {
 		this.setStatus(id, "testing", "Testing SSH connection");
 		try {
 			const inspection = await this.inspectRemote(profile);
+			await this.validateDirectory(profile, inspection.home);
 			return this.setStatus(
 				id,
 				"available",
