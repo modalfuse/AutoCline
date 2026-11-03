@@ -84,9 +84,10 @@ export async function readRemoteSessionSwa(
 	}
 
 	// Cold cache: Hub is authoritative but a failed/slow fetch must not block
-	// the UI indefinitely. Apply a short timeout so opening a cached session
-	// can render cached messages while Hub reconnects in the background.
-	const fetchTimeout = 3000;
+	// the UI indefinitely. Race the fetch with a timeout so large transcripts
+	// over flaky DERP can render empty initially, then persist + republish when
+	// the in-flight fetch completes. The fetch promise is NOT cancelled on timeout.
+	const fetchTimeout = 8000; // Raised from 3s; large sessions (1.6MB) need more headroom.
 	const fetchPromise = options.fetchMessages(sessionId);
 	const timeoutPromise = new Promise<never>((_, reject) =>
 		setTimeout(
@@ -100,9 +101,27 @@ export async function readRemoteSessionSwa(
 		persist(options, messages);
 		return { messages, fromCache: false, refresh: Promise.resolve(false) };
 	} catch (error) {
-		// Timeout or Hub error: return empty and let the caller handle the error.
-		// If a stale cache existed, the caller already has it; if not, opening
-		// the session shows an empty frame instead of infinite "Loading...".
+		// Timeout: return empty NOW so UI unblocks, but keep the fetch alive in the
+		// background. If it succeeds, persist to cache and optionally republish.
+		const isTimeout =
+			error instanceof Error && error.message.includes("timed out");
+		if (isTimeout) {
+			options.logger?.error?.(
+				"Hub message fetch timed out; returning empty, fetch continues in background",
+				{ environmentId, sessionId, fetchTimeout } as never,
+			);
+			// Keep the fetch promise alive; persist on late success.
+			const backgroundRefresh = fetchPromise
+				.then((messages) => {
+					persist(options, messages);
+					// Notify caller so webview can republish cached messages.
+					options.onRefreshed?.(messages, { updatedAt: Date.now() });
+					return true;
+				})
+				.catch(() => false);
+			return { messages: [], fromCache: false, refresh: backgroundRefresh };
+		}
+		// Non-timeout error (Hub RPC failure, network down): return empty.
 		options.logger?.error?.(
 			"Remote session fetch failed; returning empty messages",
 			{ environmentId, sessionId, error } as never,
