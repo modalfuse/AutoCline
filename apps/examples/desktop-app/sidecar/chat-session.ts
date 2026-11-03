@@ -59,7 +59,6 @@ import {
 	isCloudOuterSessionId,
 } from "./cloud-sessions";
 import {
-	broadcastEvent,
 	cancelSidecarMistakeQuestions,
 	emitChunk,
 	findSessionRuntimeBinding,
@@ -79,8 +78,6 @@ import {
 } from "./session-config";
 import { derivePromptFromMessages } from "./session-data/common";
 import { persistSessionMessages } from "./session-data/messages";
-import { writeRemoteCache } from "./session-data/remote-cache";
-import { readRemoteSessionSwa } from "./session-data/remote-session-swa";
 import type {
 	ChatSessionCommandRequest,
 	JsonRecord,
@@ -1029,53 +1026,21 @@ async function handleStart(
 	const requestedSessionId = String(
 		config.sessionId ?? config.session_id ?? "",
 	).trim();
-	// SSH sessions reuse the remote-cache on open: a warm transcript becomes
-	// `initialMessages` immediately while the Hub revalidates in the background,
-	// so resuming a big remote conversation no longer stalls on a full pull.
-	// The refreshed body is persisted and announced on the session event stream
-	// for any open view to republish.
-	let remoteSwaRefresh: Promise<boolean> = Promise.resolve(false);
-	let remoteSwaMessages: unknown[] | undefined;
-	const explicitInitialMessages =
+	const initialMessages =
 		Array.isArray(config.initialMessages) && config.initialMessages.length > 0
 			? config.initialMessages
-			: undefined;
-	if (
-		requestedSessionId &&
-		binding.kind === "ssh" &&
-		!explicitInitialMessages
-	) {
-		const swa = await readRemoteSessionSwa({
-			environmentId: binding.environmentId,
-			sessionId: requestedSessionId,
-			logger: ctx.logger,
-			fetchMessages: (id) =>
-				manager.readMessages(id).catch((error: unknown) => {
-					// The desktop supplies an ID before a new remote session
-					// exists. Only this startup read may treat missing history
-					// as empty.
-					if (isSessionNotFoundError(error)) return [];
-					throw error;
-				}),
-			onRefreshed: (_messages, meta) => {
-				broadcastEvent(ctx, "remote_session_messages_refreshed", {
-					environmentId: binding.environmentId,
-					sessionId: requestedSessionId,
-					updatedAt: meta.updatedAt,
-					fromCache: true,
-				});
-			},
-		});
-		remoteSwaMessages = swa.messages;
-		remoteSwaRefresh = swa.refresh;
-	}
-	const initialMessages =
-		explicitInitialMessages ??
-		(requestedSessionId
-			? binding.kind === "ssh"
-				? remoteSwaMessages
-				: (readPersistedChatMessages(requestedSessionId) ?? undefined)
-			: undefined);
+			: requestedSessionId
+				? binding.kind === "ssh"
+					? await manager
+							.readMessages(requestedSessionId)
+							.catch((error: unknown) => {
+								// The desktop supplies an ID before a new remote session exists.
+								// Only this startup read may treat missing history as empty.
+								if (isSessionNotFoundError(error)) return undefined;
+								throw error;
+							})
+					: (readPersistedChatMessages(requestedSessionId) ?? undefined)
+				: undefined;
 	// Resolved once start() returns; the mistake-limit prompt reads it lazily.
 	let startedSessionId = requestedSessionId;
 	const coreConfig: JsonRecord = {
@@ -1138,11 +1103,6 @@ async function handleStart(
 	);
 	ctx.liveSessions.set(sessionId, session);
 	ctx.sessionEnvironmentIds.set(sessionId, binding.environmentId);
-	// Revalidation started before start() resolved. If it later finds newer
-	// Hub content it broadcasts `remote_session_messages_refreshed` (see the
-	// onRefreshed handler above); swallow the settled result so a failed
-	// background refresh can never surface as an unhandled rejection here.
-	void remoteSwaRefresh.catch(() => false);
 	return {
 		sessionId,
 		cwd,
@@ -1941,16 +1901,7 @@ async function handleSendOnce(
 		});
 		if (session && ownsBusyState) {
 			session.status = "idle";
-			if (result?.messages) {
-				session.messages = result.messages;
-				// Persist to remote-cache immediately so reopens / Hub 1006 / reconnects
-				// can show the new turn from disk, not just what Hub last acknowledged.
-				if (binding.kind === "ssh") {
-					writeRemoteCache(binding.environmentId, sessionId, result.messages, {
-						source: "desktop:send",
-					});
-				}
-			}
+			if (result?.messages) session.messages = result.messages;
 		}
 		return {
 			sessionId,

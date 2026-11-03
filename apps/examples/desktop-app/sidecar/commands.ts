@@ -205,12 +205,6 @@ import {
 	readPersistedChatMessages,
 	readSessionMessages,
 } from "./session-data/messages";
-import {
-	invalidateRemoteCache,
-	listCachedRemoteSessions,
-	writeRemoteSessionIndex,
-} from "./session-data/remote-cache";
-import { readRemoteSessionSwa } from "./session-data/remote-session-swa";
 import { searchWorkspaceFiles } from "./session-data/search";
 import {
 	getCommitDetails,
@@ -770,45 +764,6 @@ async function listSessionsFromSidecarManager(
 		} catch {
 			// Keep history available from the other connected environments.
 		}
-		if (binding.kind === "ssh") {
-			const remoteRows = [...byId.values()].filter(
-				(row) => row.environmentId === binding.environmentId,
-			);
-			// Only write the sessions-index if we actually discovered sessions.
-			// On Hub timeout/disconnect, remoteRows would be empty; writing that
-			// would overwrite the cached index with `sessions:[]` and drop all
-			// sidebar entries. Preserve the existing cache instead.
-			if (remoteRows.length > 0) {
-				writeRemoteSessionIndex(
-					binding.environmentId,
-					remoteRows.map((row) => ({
-						sessionId: String(row.sessionId ?? ""),
-						prompt: typeof row.prompt === "string" ? row.prompt : undefined,
-						startedAt:
-							typeof row.startedAt === "string" ? row.startedAt : undefined,
-						updatedAt:
-							typeof row.updatedAt === "string"
-								? row.updatedAt
-								: typeof row.startedAt === "string"
-									? row.startedAt
-									: undefined,
-						provider:
-							typeof row.provider === "string" ? row.provider : undefined,
-						model: typeof row.model === "string" ? row.model : undefined,
-						cwd: typeof row.cwd === "string" ? row.cwd : undefined,
-						workspaceRoot:
-							typeof row.workspaceRoot === "string"
-								? row.workspaceRoot
-								: undefined,
-						status: typeof row.status === "string" ? row.status : undefined,
-						metadata:
-							row.metadata && typeof row.metadata === "object"
-								? (row.metadata as JsonRecord)
-								: undefined,
-					})),
-				);
-			}
-		}
 	}
 
 	if (byId.size === 0) {
@@ -863,34 +818,6 @@ async function listSessionsFromSidecarManager(
 					...(session.title ? { title: session.title } : {}),
 				},
 			});
-		}
-	}
-	const remoteIds = new Set<string>();
-	if (
-		ctx.activeEnvironmentId &&
-		ctx.activeEnvironmentId !== LOCAL_ENVIRONMENT_ID
-	) {
-		remoteIds.add(ctx.activeEnvironmentId);
-	}
-	try {
-		for (const profile of await getRemoteEnvironmentService(ctx).list()) {
-			if ((profile.hubUrls?.length ?? 0) > 0 || profile.hubUrl) {
-				remoteIds.add(profile.id);
-			}
-		}
-	} catch {
-		// Profile read failures must not blank the sidebar.
-	}
-	for (const environmentId of remoteIds) {
-		if (ctx.runtimeBindings.get(environmentId)?.kind === "ssh") {
-			continue; // live list above is authoritative
-		}
-		for (const cached of listCachedRemoteSessions(environmentId, max)) {
-			const sessionId = String(cached.sessionId ?? "").trim();
-			if (!sessionId) continue;
-			const key = JSON.stringify([environmentId, sessionId]);
-			if (byId.has(key)) continue;
-			byId.set(key, cached);
 		}
 	}
 
@@ -2486,84 +2413,18 @@ export async function handleCommand(
 		if (binding?.kind !== "ssh") {
 			return await readSessionMessages(ctx, sessionId, maxMessages);
 		}
-		// Stale-while-revalidate: a warm remote-cache entry lets the transcript
-		// render immediately instead of blocking the sidebar on a full Hub pull.
-		// The Hub stays authoritative — a background refresh republishes when it
-		// finds newer content, and the cached bodies never touch the local
-		// session store.
-		const swr = await readRemoteSessionSwa({
-			environmentId: binding.environmentId,
-			sessionId,
-			fetchMessages: (id) => binding.sessionManager.readMessages(id),
-			logger: ctx.logger,
-			onRefreshed: (messages, meta) => {
-				broadcastEvent(ctx, "remote_session_messages_refreshed", {
-					environmentId: binding.environmentId,
-					sessionId,
-					updatedAt: meta.updatedAt,
-					messageCount: messages.length,
-					fromCache: true,
-				});
-			},
-		});
-		// Warm/stale cache must return immediately; Hub refresh continues in
-		// the background and republishes via onRefreshed / remote_session_messages_refreshed.
-		void swr.refresh.catch(() => false);
-		// Use the binding's workspaceRoot directly instead of awaiting Hub to
-		// refine mention chips; the cached transcript must not block on a slow
-		// or still-connecting remote session manager.
+		const [remoteMessages, remoteSession] = await Promise.all([
+			binding.sessionManager.readMessages(sessionId),
+			// Only refines mention chips, so a failed lookup must not fail the read.
+			binding.sessionManager.get(sessionId).catch(() => undefined),
+		]);
 		return await readSessionMessages(
 			ctx,
 			sessionId,
 			maxMessages,
-			swr.messages,
-			binding.workspaceRoot,
+			remoteMessages,
+			remoteSession?.workspaceRoot || remoteSession?.cwd || undefined,
 		);
-	}
-	// ── Smoke-only hooks (scripts/smoke-remote-cache-live.ts) ─────────
-	if (command.startsWith("smoke_")) {
-		const smoke = ctx.smokeRemoteCache;
-		if (!smoke) {
-			throw new Error(
-				`${command} is only available with CLINE_SMOKE_REMOTE_CACHE=1`,
-			);
-		}
-		switch (command) {
-			case "smoke_bind_remote_environment":
-				return await smoke.bindRemoteEnvironment({
-					environmentId: String(args?.environmentId ?? ""),
-					endpoint: String(args?.endpoint ?? ""),
-					workspaceRoot: String(args?.workspaceRoot ?? ""),
-					sessionIds: Array.isArray(args?.sessionIds)
-						? (args.sessionIds as string[])
-						: [],
-				});
-			case "smoke_set_remote_hub_reachable":
-				return await smoke.setRemoteHubReachable({
-					environmentId: String(args?.environmentId ?? ""),
-					reachable: args?.reachable === true,
-				});
-			case "smoke_append_hub_message":
-				return await smoke.appendHubMessage({
-					environmentId: String(args?.environmentId ?? ""),
-					sessionId: String(args?.sessionId ?? ""),
-					text: String(args?.text ?? ""),
-				});
-			case "smoke_wait_for_refresh":
-				return await smoke.waitForRefresh({
-					environmentId: String(args?.environmentId ?? ""),
-					sessionId: String(args?.sessionId ?? ""),
-					timeoutMs:
-						typeof args?.timeoutMs === "number" ? args.timeoutMs : undefined,
-				});
-			case "smoke_remote_cache_path":
-				return smoke.remoteCachePath({
-					environmentId: String(args?.environmentId ?? ""),
-					sessionId: String(args?.sessionId ?? ""),
-				});
-			default:
-				throw new Error(`unknown smoke command: ${command}`);
-		}
 	}
 	if (command === "read_session_hooks") {
 		const sessionId = String(args?.sessionId ?? "").trim();
@@ -3105,8 +2966,6 @@ export async function handleCommand(
 		ctx.liveSessions.delete(sessionId);
 		ctx.sessionEnvironmentIds.delete(sessionId);
 		if (binding?.kind === "ssh") {
-			// A deleted remote session must not resurface from the SWR cache.
-			invalidateRemoteCache(binding.environmentId, sessionId);
 			if (!deleted && deleteError) throw deleteError;
 			if (deleted) {
 				broadcastEvent(ctx, "session_deleted", {

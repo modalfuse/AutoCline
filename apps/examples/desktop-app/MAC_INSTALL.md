@@ -166,32 +166,22 @@ ls -d /Applications/Cline.app /Applications/AutoCline.app 2>&1
 
 ---
 
-## 5. 数据目录与 remote-cache（重要）
+## 5. 数据目录（重要）
 
 | 内容 | 路径 | 说明 |
 |------|------|------|
 | 全局配置 / 密钥 / 会话 | `~/.cline/`（`CLINE_DIR` 可覆盖） | **与官方 Cline 共用**。两边的 API Key、设置会互相可见/互相影响——这是有意的（fork 语义），介意的话用 `CLINE_DIR=~/.cline-autocline` 单独启动 |
 | 本地会话正文 | `~/.cline/data/sessions/<sessionId>/` | 只放**本地**会话 |
-| 远程会话 SWR 缓存 | `~/.cline/data/remote-cache/<environmentId>/<sessionId>/` | 只放 **SSH / Hub 远程**会话正文 + `meta.json` |
+| 远程（SSH / Hub）会话正文 | Hub 上，Mac 侧**不落盘** | 与上游 Cline 一致：打开远程会话时向 Hub `readMessages` 全量拉取 |
 
-`remote-cache` 固定在 `<data>/remote-cache` 下（`<data>` 默认 `~/.cline/data`，
-可用 `CLINE_DATA_DIR` 覆盖），以便与旁路工具一致：
-
-```
-~/.cline/data/remote-cache/<environmentId>/<sessionId>/messages.json   # { "messages": [...] }
-~/.cline/data/remote-cache/<environmentId>/<sessionId>/meta.json       # updatedAt/fetchedAt/source/hash/...
-```
+> **1.1.0（build 34）起已移除 Mac 侧 SWR 远程缓存**：
+> `~/.cline/data/remote-cache/`、`sidecar/session-data/remote-cache.ts`、
+> `remote-session-swa.ts` 以及配套 smoke 脚本全部删除，远程会话的
+> 列表/正文/发送一律以 Hub 为唯一来源（上游 Cline 行为）。
+> 旧版本残留的 `~/.cline/data/remote-cache/` 目录可以直接删除，不再被读取。
 
 **远程正文永不写入 `~/.cline/data/sessions/`**：本地会话按裸 `sessionId` 索引，
-若远程正文写进去会串台（源码中已有 warning）。所有远程缓存读写都走
-`sidecar/session-data/remote-cache.ts`。
-
-缓存是**可丢弃**的：删掉 `~/.cline/data/remote-cache/` 只会让下一次打开远程会话
-多等一次 Hub 全量拉取。
-
-失效时机（已接）：
-- `delete_chat_session` / `delete_cli_session`（SSH 分支）→ 删除该会话缓存
-- 远程环境断开 / 重连（`disconnectRemoteSessionRuntime`）→ 删除该环境全部缓存
+若远程正文写进去会串台（源码中已有 warning）。
 
 ---
 
@@ -203,7 +193,7 @@ ls -d /Applications/Cline.app /Applications/AutoCline.app 2>&1
 | Finder 里图标还是旧 Cline 图标 | `src-tauri/icons/icon.icns` 没更新，或 Finder 图标缓存：`killall Dock` / `touch /Applications/AutoCline.app` |
 | 和 Cline 抢同一个 Dock 位置 / 通知串了 | 检查 `CFBundleIdentifier` 是否为 `bot.autocline.app`（见 §4） |
 | 启动后提示要更新，更新后变回 Cline | updater 没关：确认 `plugins.updater.endpoints` 为 `[]` |
-| 远程会话打开很慢 | 首次打开冷缓存必然走 Hub；第二次应立刻出正文（`remote-cache` 里有文件即生效） |
+| 远程会话打开很慢 | 与上游 Cline 一致：每次打开都向 Hub 全量 `readMessages`。先确认 Hub 可连（`~/.cline/data/debug-*` 日志），Mac 侧不再有本地缓存加速 |
 | `remote-cache` 目录不存在 | 说明还没打开过任何远程会话，属正常 |
 
 ---

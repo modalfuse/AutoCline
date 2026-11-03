@@ -11,7 +11,6 @@ import { join } from "node:path";
 import { SessionNotFoundError } from "@cline/core";
 import { resolveClineDir, setClineDir } from "@cline/shared/storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { invalidateRemoteCache } from "./session-data/remote-cache";
 import { materializeUserFiles } from "./attachments";
 import {
 	buildSessionConnectionUpdate,
@@ -118,23 +117,6 @@ describe("starting SSH sessions", () => {
 	const environmentId = "ssh-test";
 	const transcript = [{ role: "user" as const, content: "earlier prompt" }];
 
-	// handleStart serves a warm remote-cache entry before the Hub answers, so the
-	// cache must be empty for tests that assert which read produced the
-	// transcript. Point CLINE_DATA_DIR at a scratch dir so nothing leaks into the
-	// developer's real ~/.cline/data/remote-cache either.
-	let cacheDir: string | undefined;
-	beforeEach(() => {
-		cacheDir = mkdtempSync(join(tmpdir(), "cline-chat-session-cache-"));
-		vi.stubEnv("CLINE_DATA_DIR", cacheDir);
-		invalidateRemoteCache(environmentId);
-	});
-	afterEach(() => {
-		invalidateRemoteCache(environmentId);
-		vi.unstubAllEnvs();
-		if (cacheDir) rmSync(cacheDir, { recursive: true, force: true });
-		cacheDir = undefined;
-	});
-
 	function setup() {
 		const readMessages = vi.fn(async () => transcript);
 		const start = vi.fn(async (_input: unknown) => ({
@@ -184,7 +166,7 @@ describe("starting SSH sessions", () => {
 				config: expect.objectContaining({ sessionId }),
 			}),
 		);
-		expect(start.mock.calls[0]?.[0]).toHaveProperty("initialMessages", []);
+		expect(start.mock.calls[0]?.[0]).not.toHaveProperty("initialMessages");
 		expect(ctx.liveSessions.get(sessionId)?.messages).toEqual([]);
 		expect(ctx.sessionEnvironmentIds.get(sessionId)).toBe(environmentId);
 	});

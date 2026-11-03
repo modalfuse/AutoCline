@@ -28,13 +28,7 @@ vi.mock("@cline/core", async () => {
 	};
 });
 
-let cacheDir: string | undefined;
-
 beforeEach(() => {
-	// handleStart's remote-cache read/write is rooted at CLINE_DATA_DIR; keep it
-	// in a scratch dir so tests neither read nor pollute ~/.cline/data.
-	cacheDir = mkdtempSync(join(tmpdir(), "cline-remote-credentials-cache-"));
-	vi.stubEnv("CLINE_DATA_DIR", cacheDir);
 	mocks.settings.clear();
 	mocks.settings.set("cline", {
 		provider: "cline",
@@ -56,8 +50,6 @@ beforeEach(() => {
 });
 afterEach(() => {
 	vi.unstubAllEnvs();
-	if (cacheDir) rmSync(cacheDir, { recursive: true, force: true });
-	cacheDir = undefined;
 });
 
 function runtime() {

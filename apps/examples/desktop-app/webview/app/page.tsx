@@ -714,8 +714,9 @@ function App() {
 					return;
 				}
 
-				// Paint the remote draft + any disk-cached sessions immediately;
-				// Hub/SSH connect continues in the sidecar background.
+				// Paint the remote draft immediately; the Hub connect continues in
+				// the sidecar background and reports back via
+				// `remote_environment_changed`.
 				const priorHome =
 					readWorkspaceSelectionFromWindow(environmentId).lastWorkspace?.trim() ||
 					"";
@@ -724,8 +725,6 @@ function App() {
 					homeDir: priorHome || "/",
 				});
 				selectEnvironmentDraft(environmentId);
-				// Show any already-known sessions for this env while Hub connects.
-				void refreshSessionsRef.current();
 
 				const result =
 					await desktopClient.invoke<RemoteEnvironmentConnectResult>(
@@ -825,10 +824,11 @@ function App() {
 						id: event.environmentId,
 						homeDir: homeDir || "/",
 					});
-					// Connecting: paint disk-cached sessions; connected: SWR-refresh live list.
-					void refreshSessionsRef.current();
+					// The Hub is the only source of the session list: refresh once it
+					// reports the environment connected.
 					if (event.status === "connected") {
 						selectEnvironmentDraft(event.environmentId);
+						void refreshSessionsRef.current();
 					}
 				}
 				if (event.status === "error") {

@@ -2479,64 +2479,17 @@ export function useChatSession(environmentId: string) {
 				);
 			},
 		);
-		const unsubscribeRemoteRefreshed = subscribeToEnvironment(
-			"remote_session_messages_refreshed",
-			(payload) => {
-				if (!payload || typeof payload !== "object") return;
-				const record = payload as {
-					sessionId?: string;
-					messageCount?: number;
-					updatedAt?: number;
-				};
-				const targetSessionId = record.sessionId?.trim();
-				if (
-					!targetSessionId ||
-					targetSessionId !== activeSessionIdRef.current
-				) {
-					return;
-				}
-				// Background fetch of a cold-cache remote session completed after timeout.
-				// Re-read messages from now-warm cache so UI shows the full transcript.
-				void desktopClient
-					.invoke<ChatMessage[]>("read_session_messages", {
-						environmentId,
-						sessionId: targetSessionId,
-						maxMessages: MAX_MESSAGES,
-					})
-					.then((historyMessages) => {
-						if (activeSessionIdRef.current !== targetSessionId) return;
-						// Merge with live messages (preserving any optimistic bubbles).
-						const merged = mergeHydratedMessagesWithLive({
-							hydrated: historyMessages,
-							current: messagesRef.current,
-							sessionId: targetSessionId,
-							hydrationStartedAt: Date.now(),
-						});
-						setMessages(merged);
-						// Clear error banner if cache refresh succeeded.
-						if (historyMessages.length > 0) {
-							setError(null);
-						}
-					})
-					.catch(() => {
-						// Refresh failed; keep current UI state.
-					});
-			},
-		);
 		return () => {
 			unsubscribeStatus();
 			unsubscribeEnded();
 			unsubscribeRehydrated();
 			unsubscribeSyncFailed();
-			unsubscribeRemoteRefreshed();
 		};
 	}, [
 		appendTurnFailureMessage,
 		applyCloudSnapshotMessages,
 		clearLiveToolRefs,
-		environmentId,
 		finalizeSettledTurn,
-		mergeHydratedMessagesWithLive,
 		subscribeToEnvironment,
 	]);
 
@@ -4062,21 +4015,13 @@ export function useChatSession(environmentId: string) {
 						sessionId: session.sessionId,
 						maxMessages: MAX_MESSAGES,
 					},
-					{
-						// Remote sessions use a 3s Hub timeout; give sidecar 10s total to complete.
-						timeoutMs: 10_000,
-					},
 				);
 				if (hydrationRequestIdRef.current !== requestId) return;
-				
-				// Paint cached messages immediately so UI is not blocked on Hub attach.
-				// Always apply hydrated state (even if empty) so the session status is inferred
-				// and the UI never stays stuck on "Loading session..." / "Agent is working...".
-				void refreshPromptsInQueue(session.sessionId);
-				applyHydratedMessages(historyMessages, session.status);
-				// Always end the loading gate once messages are read (even if empty),
-				// so a slow or dying Hub attach cannot trap the UI on "Loading session...".
-				setIsHydratingSession(false);
+				if (historyMessages.length > 0) {
+					void refreshPromptsInQueue(session.sessionId);
+					applyHydratedMessages(historyMessages, session.status);
+					setIsHydratingSession(false);
+				}
 
 				const attached = await desktopClient
 					.invoke<{
@@ -4089,33 +4034,26 @@ export function useChatSession(environmentId: string) {
 						branch?: string;
 						prompt?: string;
 						environmentId?: string;
-					}>(
-						"chat_session_command",
-						{
-							request: {
-								action: "attach",
-								sessionId: session.sessionId,
-								config: {
-									executionTarget: session.origin === "cloud" ? "cloud" : "local",
-									repoUrl: session.repoUrl,
-									environmentId,
-									provider: session.provider,
-									model: session.model,
-									cwd: session.cwd,
-									workspaceRoot: session.workspaceRoot,
-								},
+					}>("chat_session_command", {
+						request: {
+							action: "attach",
+							sessionId: session.sessionId,
+							config: {
+								executionTarget: session.origin === "cloud" ? "cloud" : "local",
+								repoUrl: session.repoUrl,
+								environmentId,
+								provider: session.provider,
+								model: session.model,
+								cwd: session.cwd,
+								workspaceRoot: session.workspaceRoot,
 							},
 						},
-						{
-							// Hub attach over flaky Tailscale DERP can hang; cap it so cached
-							// messages stay visible even when Hub is unreachable.
-							timeoutMs: 10_000,
-						},
-					)
+					})
 					.catch((err) => {
 						if (hydrationRequestIdRef.current !== requestId) return undefined;
-						// With messages already painted, attach failure is non-fatal; show error
-						// banner but keep the cached transcript visible (Hub may reconnect).
+						if (historyMessages.length === 0) {
+							throw err;
+						}
 						setError(errorMessage(err));
 						return undefined;
 					});

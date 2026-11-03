@@ -179,11 +179,6 @@ export type SidecarContext = {
 	hubBuildMismatch: ManagedHubBuildMismatchEvent | null;
 	/** Local Hub setup, which runs after the transport is published. */
 	hubStartup?: HubStartup;
-	/**
-	 * Smoke-only hooks registered when CLINE_SMOKE_REMOTE_CACHE=1
-	 * (scripts/smoke-remote-cache-live.ts). Absent in normal runs.
-	 */
-	smokeRemoteCache?: import("./smoke-remote-cache-commands").SmokeRemoteCacheHooks;
 };
 export type BunRuntimeApi = {
 	serve: (options: unknown) => { port: number; stop?: () => void };
