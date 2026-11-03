@@ -83,9 +83,32 @@ export async function readRemoteSessionSwa(
 		};
 	}
 
-	const messages = await options.fetchMessages(sessionId);
-	persist(options, messages);
-	return { messages, fromCache: false, refresh: Promise.resolve(false) };
+	// Cold cache: Hub is authoritative but a failed/slow fetch must not block
+	// the UI indefinitely. Apply a short timeout so opening a cached session
+	// can render cached messages while Hub reconnects in the background.
+	const fetchTimeout = 3000;
+	const fetchPromise = options.fetchMessages(sessionId);
+	const timeoutPromise = new Promise<never>((_, reject) =>
+		setTimeout(
+			() => reject(new Error("Hub message fetch timed out")),
+			fetchTimeout,
+		),
+	);
+
+	try {
+		const messages = await Promise.race([fetchPromise, timeoutPromise]);
+		persist(options, messages);
+		return { messages, fromCache: false, refresh: Promise.resolve(false) };
+	} catch (error) {
+		// Timeout or Hub error: return empty and let the caller handle the error.
+		// If a stale cache existed, the caller already has it; if not, opening
+		// the session shows an empty frame instead of infinite "Loading...".
+		options.logger?.error?.(
+			"Remote session fetch failed; returning empty messages",
+			{ environmentId, sessionId, error } as never,
+		);
+		return { messages: [], fromCache: false, refresh: Promise.resolve(false) };
+	}
 }
 
 function persist(

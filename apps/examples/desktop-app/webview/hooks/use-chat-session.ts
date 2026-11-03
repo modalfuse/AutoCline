@@ -4017,11 +4017,16 @@ export function useChatSession(environmentId: string) {
 					},
 				);
 				if (hydrationRequestIdRef.current !== requestId) return;
+				
+				// Paint cached messages immediately so UI is not blocked on Hub attach.
+				// Even if empty, we want to show the session frame rather than infinite Loading.
 				if (historyMessages.length > 0) {
 					void refreshPromptsInQueue(session.sessionId);
 					applyHydratedMessages(historyMessages, session.status);
-					setIsHydratingSession(false);
 				}
+				// Always end the loading gate once messages are read (even if empty),
+				// so a slow or dying Hub attach cannot trap the UI on "Loading session...".
+				setIsHydratingSession(false);
 
 				const attached = await desktopClient
 					.invoke<{
@@ -4051,9 +4056,8 @@ export function useChatSession(environmentId: string) {
 					})
 					.catch((err) => {
 						if (hydrationRequestIdRef.current !== requestId) return undefined;
-						if (historyMessages.length === 0) {
-							throw err;
-						}
+						// With messages already painted, attach failure is non-fatal; show error
+						// banner but keep the cached transcript visible (Hub may reconnect).
 						setError(errorMessage(err));
 						return undefined;
 					});
