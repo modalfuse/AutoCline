@@ -1,6 +1,11 @@
 import { createServer } from "node:net";
+import type { HubWebSocketServerOptions } from "./hub-server-options";
 import { describe, expect, it } from "vitest";
 import { startHubWebSocketServer } from "./hub-websocket-server";
+
+// The schedule handlers are never invoked by these asserts; binding is the
+// only behavior under test.
+const runtimeHandlers = {} as HubWebSocketServerOptions["runtimeHandlers"];
 
 /** First free loopback port, so parallel suites never collide. */
 async function freePort(): Promise<number> {
@@ -37,7 +42,7 @@ describe("startHubWebSocketServer multi-address listen", () => {
 			pathname: "/hub",
 			eventLog: false,
 			runQueue: false,
-			runtimeHandlers: {},
+			runtimeHandlers,
 		});
 		try {
 			expect(server.listenHosts).toEqual(["127.0.0.1", "127.0.0.2"]);
@@ -61,7 +66,7 @@ describe("startHubWebSocketServer multi-address listen", () => {
 				port: 0,
 				eventLog: false,
 				runQueue: false,
-				runtimeHandlers: {},
+				runtimeHandlers,
 			}),
 		).rejects.toThrow(/wildcard address/);
 	});

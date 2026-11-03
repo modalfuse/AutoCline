@@ -183,6 +183,7 @@ import {
 import { getPullRequestStatus } from "./pull-request";
 import { capturePullRequestEvent } from "./pull-request-telemetry";
 import { resolveDesktopRemoteHelper } from "./remote-helper";
+import { hubConnectError, resolveHubUrlList } from "./remote-hub-connect";
 import {
 	getSessionChanges,
 	localGit,
@@ -2056,6 +2057,16 @@ export async function handleCommand(
 		}
 		return await withRemoteEnvironmentTransition(ctx, async () => {
 			const service = getRemoteEnvironmentService(ctx);
+			// AutoCline connects to a Hub only at the profile's configured URLs
+			// (t848u): there is no SSH tunnel and no per-session localhost
+			// forward, so a profile without hubUrls is refused up front with a
+			// message that says what to add instead of failing deep in the SDK.
+			const targetProfile = (await service.list()).find(
+				(item) => item.id === id,
+			);
+			if (targetProfile && resolveHubUrlList(targetProfile).length === 0) {
+				throw hubConnectError(targetProfile, []);
+			}
 			const previousEnvironmentId = ctx.activeEnvironmentId;
 			const previousServiceProfileId = service.getActive()?.profileId;
 			const previousRuntimeProfileId =

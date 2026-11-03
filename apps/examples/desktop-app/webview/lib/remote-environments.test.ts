@@ -44,8 +44,13 @@ describe("remote environment models", () => {
 			host: "builder.example.com",
 			user: "ubuntu",
 			port: 2222,
+			hubUrls: ["ws://100.101.163.69:25463/hub"],
 		};
 		expect(validateRemoteEnvironmentProfile(profile)).toBeUndefined();
+		// A Hub URL is what the desktop actually dials, so it is required.
+		expect(
+			validateRemoteEnvironmentProfile({ ...profile, hubUrls: [] }),
+		).toContain("At least one Hub URL is required");
 		expect(formatRemoteEnvironmentDestination(profile)).toBe(
 			"ubuntu@builder.example.com:2222",
 		);

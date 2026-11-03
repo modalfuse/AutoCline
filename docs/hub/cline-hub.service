@@ -1,0 +1,23 @@
+[Unit]
+Description=Cline Hub daemon (bind list from ~/.config/cline/hub.json)
+After=network-online.target llm-router.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/joe
+EnvironmentFile=-/home/joe/.config/cline/hub.env
+Environment=HOME=/home/joe
+Environment=PATH=/home/joe/.local/bin:/home/joe/.openclaw/tools/node-v24.22.1/bin:/usr/local/bin:/usr/bin:/bin
+# The bind list comes from ~/.config/cline/hub.json (listenHosts / listenUrls).
+# Do NOT hardcode --host here: `hub ensure` resolves the list, forwards each
+# address to the daemon as --listen-host, and rejects 0.0.0.0 / ::.
+ExecStart=/bin/bash -lc 'set -e; /home/joe/.local/bin/cline hub ensure --hub-config /home/joe/.config/cline/hub.json; while true; do /home/joe/.local/bin/cline hub status | grep -q "\"running\":true"; sleep 20; done'
+ExecStop=/home/joe/.local/bin/cline hub stop
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

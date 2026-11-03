@@ -74,6 +74,7 @@ const profile: RemoteEnvironmentProfile = {
 	host: "build.example.com",
 	user: "alice",
 	port: 2222,
+	hubUrls: ["ws://100.101.163.69:25463/hub"],
 	createdAt: "2026-08-06T12:00:00.000Z",
 	updatedAt: "2026-08-06T12:00:00.000Z",
 };
@@ -332,6 +333,29 @@ describe("remote environment command routing", () => {
 			remoteArch: "arm64",
 		});
 		expect(fake.test).toHaveBeenCalledWith(profile.id);
+	});
+
+	it("refuses a proxy-less profile with no hubUrls instead of tunnelling", async () => {
+		const { handleCommand } = await import("./commands");
+		const { createSidecarContext } = await import("./context");
+		const sshOnly: RemoteEnvironmentProfile = {
+			...profile,
+			id: "ssh-only",
+			name: "SSH only",
+			hubUrls: undefined,
+		};
+		const fake = createFakeService([
+			{ ...connection, profile: sshOnly, profileId: sshOnly.id },
+		]);
+		const ctx = createSidecarContext("/local/project");
+		ctx.remoteEnvironments = fake.service;
+
+		await expect(
+			handleCommand(ctx, "connect_remote_environment", { id: sshOnly.id }),
+		).rejects.toThrow(/no hubUrls|Tried: \(none configured\)/);
+		// Nothing was attempted: no SSH connect, no Hub runtime.
+		expect(fake.connect).not.toHaveBeenCalled();
+		expect(coreCreateMock).not.toHaveBeenCalled();
 	});
 
 	it("connects an authenticated remote runtime, records its binding, and disconnects it cleanly", async () => {
