@@ -148,7 +148,6 @@ export interface RemoteEnvironmentServiceOptions {
 	knownHostsPath?: string;
 	connectTimeoutSeconds?: number;
 	commandTimeoutMs?: number;
-	uploadTimeoutMs?: number;
 	hubShutdownTimeoutMs?: number;
 	helperBinaryPath?: string;
 	helperBinaryDirectory?: string;
@@ -179,7 +178,6 @@ const PROFILE_FILE_VERSION = 1;
 // whole bastion hop has to finish within it.
 const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30;
 const DEFAULT_COMMAND_TIMEOUT_MS = 60_000;
-const DEFAULT_UPLOAD_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_HUB_SHUTDOWN_TIMEOUT_MS = 2_000;
 const REMOTE_HELPER_DIRECTORY = ".cline/remote";
 const REMOTE_DISCOVERY_DIRECTORY = ".cline/data/remote";
@@ -255,7 +253,6 @@ export class RemoteEnvironmentService {
 	private readonly knownHostsPath?: string;
 	private readonly connectTimeoutSeconds: number;
 	private readonly commandTimeoutMs: number;
-	private readonly uploadTimeoutMs: number;
 	private readonly hubShutdownTimeoutMs: number;
 	/** Optional absolute helper path on the *remote* host (never uploaded). */
 	private readonly remoteHelperOverridePath?: string;
@@ -295,7 +292,6 @@ export class RemoteEnvironmentService {
 			options.connectTimeoutSeconds ?? DEFAULT_CONNECT_TIMEOUT_SECONDS;
 		this.commandTimeoutMs =
 			options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
-		this.uploadTimeoutMs = options.uploadTimeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS;
 		this.hubShutdownTimeoutMs =
 			options.hubShutdownTimeoutMs ?? DEFAULT_HUB_SHUTDOWN_TIMEOUT_MS;
 		// Same env can name a local hash source *or* a pre-installed remote path;
@@ -707,11 +703,16 @@ export class RemoteEnvironmentService {
 		remoteDirectory: string,
 		prefix: string,
 	): Promise<string | undefined> {
+		// Use a brace group after the pipe so `exit` sets the pipeline status.
+		// A bare `ls | while ...; done; exit 1` always exits 1 because `exit`
+		// inside `while` only ends the pipe subshell, then the trailing `exit 1`
+		// runs — which made every existing helper look missing.
 		const script =
 			`dir=${shellQuote(remoteDirectory)}; pref=${shellQuote(prefix)}; ` +
-			'ls -1t "$dir"/"$pref"* 2>/dev/null | while IFS= read -r f; do ' +
+			'ls -1t "$dir"/"$pref"* 2>/dev/null | { ' +
+			'while IFS= read -r f; do ' +
 			'test -x "$f" || continue; test -d "$f" && continue; ' +
-			`printf '%s\n' "$f"; exit 0; done; exit 1`;
+			`printf '%s\n' "$f"; exit 0; done; exit 1; }`;
 		const listed = await this.execRemoteAllowFailure(profile, {
 			command: "sh",
 			args: ["-c", script],
