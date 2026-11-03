@@ -774,34 +774,40 @@ async function listSessionsFromSidecarManager(
 			const remoteRows = [...byId.values()].filter(
 				(row) => row.environmentId === binding.environmentId,
 			);
-			writeRemoteSessionIndex(
-				binding.environmentId,
-				remoteRows.map((row) => ({
-					sessionId: String(row.sessionId ?? ""),
-					prompt: typeof row.prompt === "string" ? row.prompt : undefined,
-					startedAt:
-						typeof row.startedAt === "string" ? row.startedAt : undefined,
-					updatedAt:
-						typeof row.updatedAt === "string"
-							? row.updatedAt
-							: typeof row.startedAt === "string"
-								? row.startedAt
+			// Only write the sessions-index if we actually discovered sessions.
+			// On Hub timeout/disconnect, remoteRows would be empty; writing that
+			// would overwrite the cached index with `sessions:[]` and drop all
+			// sidebar entries. Preserve the existing cache instead.
+			if (remoteRows.length > 0) {
+				writeRemoteSessionIndex(
+					binding.environmentId,
+					remoteRows.map((row) => ({
+						sessionId: String(row.sessionId ?? ""),
+						prompt: typeof row.prompt === "string" ? row.prompt : undefined,
+						startedAt:
+							typeof row.startedAt === "string" ? row.startedAt : undefined,
+						updatedAt:
+							typeof row.updatedAt === "string"
+								? row.updatedAt
+								: typeof row.startedAt === "string"
+									? row.startedAt
+									: undefined,
+						provider:
+							typeof row.provider === "string" ? row.provider : undefined,
+						model: typeof row.model === "string" ? row.model : undefined,
+						cwd: typeof row.cwd === "string" ? row.cwd : undefined,
+						workspaceRoot:
+							typeof row.workspaceRoot === "string"
+								? row.workspaceRoot
 								: undefined,
-					provider:
-						typeof row.provider === "string" ? row.provider : undefined,
-					model: typeof row.model === "string" ? row.model : undefined,
-					cwd: typeof row.cwd === "string" ? row.cwd : undefined,
-					workspaceRoot:
-						typeof row.workspaceRoot === "string"
-							? row.workspaceRoot
-							: undefined,
-					status: typeof row.status === "string" ? row.status : undefined,
-					metadata:
-						row.metadata && typeof row.metadata === "object"
-							? (row.metadata as JsonRecord)
-							: undefined,
-				})),
-			);
+						status: typeof row.status === "string" ? row.status : undefined,
+						metadata:
+							row.metadata && typeof row.metadata === "object"
+								? (row.metadata as JsonRecord)
+								: undefined,
+					})),
+				);
+			}
 		}
 	}
 

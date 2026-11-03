@@ -12,6 +12,7 @@ import { normalizeProviderId } from "@/lib/provider-id";
 const ALL_SETTINGS_SECTIONS = [
 	"General",
 	"Account",
+	"Keys",
 	"Local Models",
 	"Providers",
 	"Voice",
@@ -67,6 +68,13 @@ export const CUSTOMIZATION_SECTION_LABELS: Record<
 > = {
 	Customize: "Installed",
 	Marketplace: "Marketplace",
+};
+
+// Settings sections with custom labels (singular Key as requested)
+export const SETTINGS_SECTION_LABELS: Partial<
+	Record<(typeof ALL_SETTINGS_SECTIONS)[number], string>
+> = {
+	Keys: "Key",
 };
 
 export type SettingsSection =

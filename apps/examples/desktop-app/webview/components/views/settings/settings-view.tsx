@@ -621,7 +621,12 @@ export function SettingsView({
 	);
 
 	const content =
-		activeNav === "Providers" ? (
+		activeNav === "Keys" ? (
+			<>
+				{providerContent}
+				{addProviderDialog}
+			</>
+		) : activeNav === "Providers" ? (
 			<>
 				{providerContent}
 				{addProviderDialog}

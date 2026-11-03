@@ -1688,17 +1688,11 @@ fn main() {
         .on_window_event(|window, event| {
             if window.label() == MAIN_WINDOW_LABEL {
                 if let WindowEvent::CloseRequested { api, .. } = event {
+                    // AutoCline: fully quit when the window is closed instead of
+                    // hiding it in the background. The tray can still reopen if
+                    // clicked, but closing the window terminates the app.
                     api.prevent_close();
-                    // Without a tray (Linux with no StatusNotifier host, e.g.
-                    // stock GNOME) nothing could bring a hidden window back or
-                    // quit the app, so close quits instead, through the same
-                    // exit path as the tray's Quit item.
-                    #[cfg(target_os = "linux")]
-                    if !linux_tray::status_notifier_host_registered() {
-                        window.app_handle().exit(0);
-                        return;
-                    }
-                    hide_main_window(window);
+                    window.app_handle().exit(0);
                 }
             }
         })

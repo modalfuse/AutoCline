@@ -22,6 +22,7 @@ import {
 	Import,
 	Info,
 	Keyboard,
+	KeyRound,
 	Loader2,
 	Mic,
 	Network,
@@ -91,6 +92,7 @@ import {
 	PROVIDER_SECTION_LABELS,
 	PROVIDER_SECTIONS,
 	readProviderSectionInUse,
+	SETTINGS_SECTION_LABELS,
 	SETTINGS_SECTIONS,
 	type SettingsSection,
 } from "@/components/views/settings/sections";
@@ -164,6 +166,7 @@ function hubPort(url: string | null): string | null {
 
 const SETTINGS_SECTION_ICONS = {
 	General: SlidersHorizontal,
+	Keys: KeyRound,
 	Providers: Plug,
 	"Local Models": Cpu,
 	Voice: Mic,
@@ -184,9 +187,13 @@ const SETTINGS_SECTION_ICONS = {
 // Marketplace row, which supplies the context).
 function settingsSectionLabel(section: SettingsSection): string {
 	return (
+		SETTINGS_SECTION_LABELS[
+			section as keyof typeof SETTINGS_SECTION_LABELS
+		] ??
 		CUSTOMIZATION_SECTION_LABELS[
 			section as keyof typeof CUSTOMIZATION_SECTION_LABELS
-		] ?? section
+		] ??
+		section
 	);
 }
 
