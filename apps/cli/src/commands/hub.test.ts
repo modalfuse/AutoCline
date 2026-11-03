@@ -8,6 +8,7 @@ const {
 	mockProbeHubServer,
 	mockReadHubDiscovery,
 	mockRequestHubDrain,
+	mockResolveHubConfigPort,
 	mockResolveProductionHubOwnerContext,
 	mockResolveSharedHubOwnerContext,
 	mockStopLocalHubServerGracefully,
@@ -19,6 +20,8 @@ const {
 	mockProbeHubServer: vi.fn(),
 	mockReadHubDiscovery: vi.fn(),
 	mockRequestHubDrain: vi.fn(),
+	// No hub.json in the test environment: default to "unset".
+	mockResolveHubConfigPort: vi.fn(() => 0),
 	mockResolveProductionHubOwnerContext: vi.fn(() => ({
 		ownerId: "hub-production",
 		discoveryPath: "/tmp/cline-data/locks/hub/production.json",
@@ -38,6 +41,7 @@ vi.mock("@cline/core", () => ({
 	probeHubServer: mockProbeHubServer,
 	readHubDiscovery: mockReadHubDiscovery,
 	requestHubDrain: mockRequestHubDrain,
+	resolveHubConfigPort: mockResolveHubConfigPort,
 	resolveProductionHubOwnerContext: mockResolveProductionHubOwnerContext,
 	resolveSharedHubOwnerContext: mockResolveSharedHubOwnerContext,
 	stopLocalHubServerGracefully: mockStopLocalHubServerGracefully,
@@ -129,6 +133,63 @@ describe("createHubCommand", () => {
 			exitCode: () => exitCode,
 		};
 	}
+
+	it("forwards --hosts as the hub listen list", async () => {
+		mockEnsureDetachedHubServer.mockResolvedValue({
+			url: "ws://127.0.0.1:25463/hub",
+			authToken: "token",
+		});
+
+		const { cmd, exitCode } = createCommand();
+		await cmd.parseAsync(
+			["ensure", "--hosts", "127.0.0.1, 100.101.163.69"],
+			{ from: "user" },
+		);
+
+		expect(exitCode()).toBe(0);
+		expect(mockEnsureDetachedHubServer).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				listenHosts: ["127.0.0.1", "100.101.163.69"],
+			}),
+		);
+	});
+
+	it("uses the listen config's port when --port is not given", async () => {
+		mockResolveHubConfigPort.mockReturnValue(25463);
+		mockEnsureDetachedHubServer.mockResolvedValue({
+			url: "ws://127.0.0.1:25463/hub",
+			authToken: "token",
+		});
+
+		const { cmd, exitCode } = createCommand();
+		await cmd.parseAsync(["ensure"], { from: "user" });
+
+		expect(exitCode()).toBe(0);
+		expect(mockResolveHubConfigPort).toHaveBeenCalled();
+		expect(mockEnsureDetachedHubServer).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ port: 25463 }),
+		);
+	});
+
+	it("lets an explicit --port win over the listen config", async () => {
+		mockResolveHubConfigPort.mockReturnValue(25463);
+		mockEnsureDetachedHubServer.mockResolvedValue({
+			url: "ws://127.0.0.1:41000/hub",
+			authToken: "token",
+		});
+
+		const { cmd, exitCode } = createCommand();
+		await cmd.parseAsync(["ensure", "--port", "41000"], { from: "user" });
+
+		expect(exitCode()).toBe(0);
+		expect(mockResolveHubConfigPort).not.toHaveBeenCalled();
+		expect(mockEnsureDetachedHubServer).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ port: 41000 }),
+		);
+	});
 
 	it.each([
 		"ensure",

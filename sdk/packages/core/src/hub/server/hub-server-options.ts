@@ -24,7 +24,14 @@ export interface HubWebSocketServerOptions {
 	sessionSearchOptions?: SessionHistorySearchOptions;
 	/** Workspace authority assigned by the Hub to authenticated clients. */
 	workspaceRoot?: string;
+	/** Primary bind address (the endpoint published in the discovery record). */
 	host?: string;
+	/**
+	 * Additional addresses bound on the same port, e.g. the host's Tailscale IP
+	 * alongside `127.0.0.1`. Resolved from `~/.config/cline/hub.json`
+	 * (`listenHosts`) when the daemon starts. Wildcards are rejected.
+	 */
+	listenHosts?: string[];
 	port?: number;
 	pathname?: string;
 	owner?: HubOwnerContext;
@@ -83,6 +90,10 @@ export interface HubWebSocketServer {
 	host: string;
 	port: number;
 	url: string;
+	/** Every address this listener is bound to, `host` first. */
+	listenHosts?: string[];
+	/** `ws://<host>:<port><pathname>` for each entry of `listenHosts`. */
+	urls?: string[];
 	authToken: string;
 	/**
 	 * Starts the memoized two-phase close. Runtime/session teardown is exposed

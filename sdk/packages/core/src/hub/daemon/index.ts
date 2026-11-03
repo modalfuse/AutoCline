@@ -45,11 +45,20 @@ import {
 	resolveHubEndpointOptions,
 } from "../discovery/defaults";
 import {
+	resolveHubListenConfig,
+	validateListenHosts,
+} from "../discovery/hub-config";
+import {
 	resolveProductionHubOwnerContext,
 	resolveSharedHubOwnerContext,
 } from "../discovery/workspace";
 
 export interface DetachedHubOptions extends HubEndpointOverrides {
+	/**
+	 * Extra bind addresses forwarded to the daemon (`--listen-host`). Resolved
+	 * from `~/.config/cline/hub.json` (`listenHosts`) when omitted.
+	 */
+	listenHosts?: string[];
 	allowPortFallback?: boolean;
 	/** Disable account-wide connector supervision for session-only Hubs. Defaults to true. */
 	manageConnectors?: boolean;
@@ -116,14 +125,48 @@ function shouldAttemptRetire(url: string, now = Date.now()): boolean {
 	return entry.count <= HUB_RETIRE_ATTEMPT_LIMIT;
 }
 
-function endpointArgs(endpoint: HubEndpointOverrides): string[] {
+function endpointArgs(endpoint: DetachedHubOptions): string[] {
 	return [
 		...(endpoint.host ? ["--host", endpoint.host] : []),
 		...(typeof endpoint.port === "number"
 			? ["--port", String(endpoint.port)]
 			: []),
 		...(endpoint.pathname ? ["--pathname", endpoint.pathname] : []),
+		// Repeated flags keep the config order, which decides which address is
+		// the primary one in the discovery record.
+		...(endpoint.listenHosts ?? []).flatMap((host) => [
+			"--listen-host",
+			host,
+		]),
 	];
+}
+
+/**
+ * Resolves the addresses the daemon should bind. An explicit `listenHosts`
+ * wins; otherwise `~/.config/cline/hub.json` decides, and the historical
+ * loopback-only bind is the fallback. Wildcards throw here, before a daemon is
+ * spawned, so `cline hub ensure` fails loudly instead of binding every NIC.
+ */
+export function resolveDaemonListenHosts(
+	overrides: Pick<DetachedHubOptions, "host" | "listenHosts" | "port">,
+	defaultPort: number,
+): string[] {
+	if (overrides.listenHosts && overrides.listenHosts.length > 0) {
+		return validateListenHosts(overrides.listenHosts, "hub ensure --hosts");
+	}
+	const config = resolveHubListenConfig({
+		defaultPort: overrides.port ?? defaultPort,
+	});
+	const hosts = config.hosts;
+	if (overrides.host && !hosts.includes(overrides.host)) {
+		// An explicitly requested primary address is always bound, even when the
+		// config file does not list it.
+		return validateListenHosts(
+			[overrides.host, ...hosts],
+			config.configPath ?? "hub listen config",
+		);
+	}
+	return hosts;
 }
 
 function openDetachedHubLogFile(): { fd: number; logPath: string } | undefined {
@@ -760,9 +803,16 @@ async function ensureDetachedHubServerLocked(
 	const spawnEndpoint = shouldUseFallbackPort
 		? { ...endpoint, port: 0 }
 		: endpoint;
+	// Resolved before spawning so a wildcard or unreadable hub.json fails here
+	// with a clear error instead of killing a freshly spawned daemon.
+	const listenHosts = resolveDaemonListenHosts(
+		endpointOverrides,
+		endpoint.port,
+	);
 	await endpointOverrides.beforeSpawn?.();
 	await spawnDetachedHubServerWithRetry(workspaceRoot, {
 		...spawnEndpoint,
+		listenHosts,
 		manageConnectors: endpointOverrides.manageConnectors,
 	});
 	const deadline = Date.now() + HUB_STARTUP_TIMEOUT_MS;

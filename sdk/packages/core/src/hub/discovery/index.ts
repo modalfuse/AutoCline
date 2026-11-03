@@ -34,6 +34,10 @@ export interface HubServerDiscoveryRecord {
 	host: string;
 	port: number;
 	url: string;
+	/** Every configured bind address, `host` first (AutoCline multi-listen). */
+	listenHosts?: string[];
+	/** `ws://<host>:<port><pathname>` per bound address. */
+	urls?: string[];
 	pid?: number;
 	startedAt: string;
 	updatedAt: string;
@@ -50,6 +54,10 @@ export type HubServerProbeRecord = {
 	host: string;
 	port: number;
 	url: string;
+	/** Every configured bind address, `host` first (AutoCline multi-listen). */
+	listenHosts?: string[];
+	/** `ws://<host>:<port><pathname>` per bound address. */
+	urls?: string[];
 	hubId?: string;
 	authToken?: string;
 	pid?: number;
@@ -601,6 +609,16 @@ export async function probeHubServer(
 				? parsed.capabilities.filter(
 						(capability): capability is string =>
 							typeof capability === "string",
+					)
+				: undefined,
+			listenHosts: Array.isArray(parsed.listenHosts)
+				? parsed.listenHosts.filter(
+						(host): host is string => typeof host === "string",
+					)
+				: undefined,
+			urls: Array.isArray(parsed.urls)
+				? parsed.urls.filter(
+						(entry): entry is string => typeof entry === "string",
 					)
 				: undefined,
 			coreVersion:

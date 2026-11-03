@@ -114,6 +114,9 @@ vi.mock("node:fs", () => ({
 	closeSync,
 	mkdirSync,
 	openSync,
+	// Hub listen config resolution stats the config file; the test harness has
+	// no hub.json, so absent is the honest answer.
+	existsSync: () => false,
 }));
 
 vi.mock("@cline/shared", () => ({

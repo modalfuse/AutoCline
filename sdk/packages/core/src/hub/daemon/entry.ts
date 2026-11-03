@@ -18,6 +18,7 @@ import {
 import { reconnectDaemonConnectors } from "../../services/connectors/daemon-connector-reconnect";
 import { createLocalHubScheduleRuntimeHandlers } from "../daemon/runtime-handlers";
 import { resolveHubEndpointOptions } from "../discovery/defaults";
+import { resolveHubListenConfig } from "../discovery/hub-config";
 import {
 	HUB_LOCK_HELD_EXIT_CODE,
 	isHubLockHeldError,
@@ -92,12 +93,15 @@ function parseArgs(argv: string[]): {
 	cwd: string;
 	manageConnectors: boolean;
 	host?: string;
+	/** Extra bind addresses passed by the launcher (`--listen-host`). */
+	listenHosts: string[];
 	port?: number;
 	pathname?: string;
 } {
 	let manageConnectors = true;
 	let cwd = process.cwd();
 	let host: string | undefined;
+	const listenHosts: string[] = [];
 	let port: number | undefined;
 	let pathname: string | undefined;
 
@@ -118,6 +122,11 @@ function parseArgs(argv: string[]): {
 			index += 1;
 			continue;
 		}
+		if (arg === "--listen-host" && value) {
+			listenHosts.push(value);
+			index += 1;
+			continue;
+		}
 		if (arg === "--port" && value) {
 			const parsed = Number(value);
 			if (Number.isFinite(parsed)) {
@@ -132,7 +141,7 @@ function parseArgs(argv: string[]): {
 		}
 	}
 
-	return { cwd, host, port, pathname, manageConnectors };
+	return { cwd, host, listenHosts, port, pathname, manageConnectors };
 }
 
 /**
@@ -170,6 +179,28 @@ async function main(): Promise<void> {
 		port: options.port,
 		pathname: options.pathname,
 	});
+
+	// Multi-address listen (AutoCline v1.2 §9.2): the launcher passes every
+	// configured address explicitly; a daemon started directly from a shell with
+	// only --host falls back to ~/.config/cline/hub.json so `hub.json` alone is
+	// enough to open the Tailscale address. Wildcards throw before any bind.
+	let listenHosts: string[] | undefined;
+	if (options.listenHosts.length > 0) {
+		listenHosts = options.listenHosts;
+	} else if (!options.host) {
+		const listenConfig = resolveHubListenConfig({
+			defaultPort:
+				options.port ?? resolveHubEndpointOptions({}).port,
+		});
+		if (listenConfig.source !== "default") {
+			listenHosts = listenConfig.hosts;
+			process.stderr.write(
+				`[hub-daemon] listen hosts from ${listenConfig.source}${
+					listenConfig.configPath ? ` (${listenConfig.configPath})` : ""
+				}: ${listenConfig.hosts.join(", ")}\n`,
+			);
+		}
+	}
 
 	const daemonTelemetry = createHubDaemonTelemetry();
 	const formatError = (error: unknown): string =>
@@ -274,6 +305,7 @@ async function main(): Promise<void> {
 				});
 			},
 			host: endpoint.host,
+			...(listenHosts ? { listenHosts } : {}),
 			port: endpoint.port,
 			pathname: endpoint.pathname,
 			owner:

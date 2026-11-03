@@ -50,6 +50,7 @@ export * from "./daemon/runtime-handlers";
 export * from "./daemon/start-shared-server";
 export * from "./discovery";
 export * from "./discovery/defaults";
+export * from "./discovery/hub-config";
 export * from "./discovery/instance-lock";
 export * from "./discovery/workspace";
 export * from "./server";

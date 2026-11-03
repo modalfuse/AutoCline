@@ -7,6 +7,7 @@ import {
 	probeHubServer,
 	readHubDiscovery,
 	requestHubDrain,
+	resolveHubConfigPort,
 	resolveProductionHubOwnerContext,
 	resolveSharedHubOwnerContext,
 	stopLocalHubServerGracefully,
@@ -38,6 +39,10 @@ interface HubEnsureCommandOptions extends Partial<HubOptions> {
 	allowPortFallback?: boolean;
 	connectors?: boolean;
 	loginShellPath?: boolean;
+	/** Comma separated bind addresses; overrides the hub.json listen list. */
+	hosts?: string[];
+	/** Hub listen config file, when not the default `~/.config/cline/hub.json`. */
+	hubConfig?: string;
 }
 
 const HUB_DISCOVERY_PATH_ENV = "CLINE_HUB_DISCOVERY_PATH";
@@ -157,10 +162,23 @@ export function createHubCommand(
 
 	const ensureAction = action(async (cmdOptions: HubEnsureCommandOptions) => {
 		const opts = resolveOptions(cmdOptions);
+		// Point the resolver (and the daemon it spawns) at a non-default config
+		// file; the env var is inherited by the detached daemon.
+		if (cmdOptions.hubConfig?.trim()) {
+			process.env.CLINE_HUB_CONFIG = cmdOptions.hubConfig.trim();
+		}
+		// The listen config's port is the standalone Hub's port; an explicit
+		// --port (or CLINE_HUB_PORT) wins.
+		const configuredPort = opts.port
+			? undefined
+			: resolveHubConfigPort({ defaultPort: 0 }) || undefined;
 		const result = await ensureDetachedHubServer(opts.cwd, {
 			host: opts.host,
-			port: opts.port,
+			port: opts.port ?? configuredPort,
 			pathname: opts.pathname,
+			...(cmdOptions.hosts && cmdOptions.hosts.length > 0
+				? { listenHosts: cmdOptions.hosts }
+				: {}),
 			...(cmdOptions.allowPortFallback ? { allowPortFallback: true } : {}),
 			...(cmdOptions.connectors === false ? { manageConnectors: false } : {}),
 			// Launchers without a login shell (GUI apps, non-interactive SSH)
@@ -197,6 +215,15 @@ export function createHubCommand(
 				"Print the hub URL and auth token as JSON for programmatic clients",
 			)
 			.option(
+				"--hosts <hosts>",
+				"Comma separated bind addresses; defaults to listenHosts in ~/.config/cline/hub.json",
+				(value) => value.split(",").map((host) => host.trim()).filter(Boolean),
+			)
+			.option(
+				"--hub-config <path>",
+				"Hub listen config file (default ~/.config/cline/hub.json)",
+			)
+			.option(
 				"--allow-port-fallback",
 				"Use an OS-assigned port when the requested one is unavailable",
 			)
@@ -228,6 +255,18 @@ export function createHubCommand(
 					uptime,
 					cliVersion,
 					coreVersion: health?.coreVersion ?? discovery?.coreVersion,
+					// Addresses this Hub accepted clients on when it published its
+					// discovery record (AutoCline multi-listen).
+					// The running Hub is authoritative for what it listens on; the
+					// discovery record is only a fallback for older Hubs.
+					listenUrls: health?.urls?.length
+						? health.urls
+						: health?.url
+							? [health.url]
+							: discovery?.url
+								? [discovery.url]
+								: undefined,
+					listenHosts: health?.listenHosts ?? discovery?.listenHosts,
 				}),
 			);
 		}),
