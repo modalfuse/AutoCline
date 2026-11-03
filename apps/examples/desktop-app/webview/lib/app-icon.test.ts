@@ -99,14 +99,14 @@ describe("app icon", () => {
 		expect(document.querySelector('link[rel="icon"]')).toBeNull();
 	});
 
-	it("re-applies only non-bundled choices at boot", async () => {
+	it("forces the bundled default icon at boot and clears stored preference", async () => {
 		isTauriAvailable.mockReturnValue(true);
 		invoke.mockResolvedValue(true);
-		await syncAppIcon();
-		expect(invoke).not.toHaveBeenCalled();
-
 		window.localStorage.setItem(APP_ICON_STORAGE_KEY, "classic");
 		await syncAppIcon();
-		expect(invoke).toHaveBeenCalledWith("set_app_icon", { icon: "classic" });
+		expect(invoke).toHaveBeenCalledWith("set_app_icon", {
+			icon: DEFAULT_APP_ICON,
+		});
+		expect(window.localStorage.getItem(APP_ICON_STORAGE_KEY)).toBeNull();
 	});
 });

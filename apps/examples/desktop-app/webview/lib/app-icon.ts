@@ -3,9 +3,9 @@ import { desktopClient, isTauriAvailable } from "@/lib/desktop-client";
 export const APP_ICON_STORAGE_KEY = "cline.code.app-icon.v1";
 
 /**
- * App icon variants selectable in Settings. "midnight" is the icon bundled
- * with the app; the others live in webview/public/app-icons (picker +
- * browser favicon) and src-tauri/icons/app (runtime app icon resources).
+ * Bundled Dock/taskbar icon variants (assets under webview/public/app-icons
+ * and src-tauri/icons/app). Settings no longer exposes a picker; AutoCline
+ * always applies DEFAULT_APP_ICON ("midnight") at launch via syncAppIcon.
  */
 export const APP_ICONS = [
 	{ id: "classic", label: "Classic" },
@@ -94,12 +94,15 @@ export async function setStoredAppIcon(icon: AppIconId): Promise<void> {
 }
 
 /**
- * Re-applies the persisted choice on launch. The native app icon reverts to
- * the bundled icon on every restart, so the app shell calls this once at boot.
+ * Keeps the Dock/taskbar on the bundled AutoCline default icon. Settings no
+ * longer offers an icon picker; clear any leftover Classic/Midnight/Hologram/
+ * Chip preference so older builds cannot resurrect a non-default Dock icon.
  */
 export async function syncAppIcon(): Promise<void> {
-	const icon = readStoredAppIcon();
-	if (icon !== DEFAULT_APP_ICON) {
-		await applyAppIcon(icon);
+	try {
+		window.localStorage.removeItem(APP_ICON_STORAGE_KEY);
+	} catch {
+		// Storage may be unavailable; still apply the bundled default below.
 	}
+	await applyAppIcon(DEFAULT_APP_ICON);
 }

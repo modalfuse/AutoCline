@@ -374,7 +374,8 @@ describe("RemoteEnvironmentService", () => {
 			remoteArch: "x64",
 			remoteHome: "/home/alice",
 		});
-		expect(invocations).toHaveLength(1);
+		// inspect (uname) + validateDirectory (test -d $HOME)
+		expect(invocations).toHaveLength(2);
 		expect(invocations[0]?.executable).toBe("ssh");
 		expect(invocations[0]?.args).toEqual(
 			expect.arrayContaining([
@@ -391,6 +392,7 @@ describe("RemoteEnvironmentService", () => {
 			]),
 		);
 		expect(invocations[0]?.args.at(-1)).toContain("uname -s");
+		expect(invocations[1]?.args.at(-1)).toContain("test");
 	});
 
 	it("leaves the SSH port unset so an OpenSSH config alias can choose it", async () => {
