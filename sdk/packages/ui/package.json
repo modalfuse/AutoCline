@@ -142,8 +142,7 @@
 		"build-storybook": "storybook build --output-dir tmp/storybook-static",
 		"test:package": "bun run build && bun scripts/smoke-package.ts",
 		"typecheck": "bun tsc -p tsconfig.json --noEmit",
-		"test": "bun run check:theme-generated && vitest run --config vitest.config.ts",
-		"test:controls-browser": "bun scripts/test-button-browser.ts"
+		"test": "bun run check:theme-generated && vitest run --config vitest.config.ts"
 	},
 	"peerDependencies": {
 		"@pierre/diffs": "^1.3.0",
@@ -206,8 +205,6 @@
 		"typescript": "5.9.3",
 		"vite": "^7.1.11",
 		"vitest": "^4.0.18",
-		"@tailwindcss/node": "4.3.3",
-		"playwright": "1.62.1",
 		"@radix-ui/react-alert-dialog": "1.1.15"
 	},
 	"dependencies": {
