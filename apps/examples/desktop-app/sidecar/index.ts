@@ -29,6 +29,7 @@ import { HubStartup } from "./hub-startup";
 import { createDesktopObservability } from "./observability";
 import { resolveWorkspaceRoot } from "./paths";
 import { startServer } from "./server";
+import { registerSmokeRemoteCacheCommands } from "./smoke-remote-cache-commands";
 import { BunRuntime, SIDECAR_HOST, SIDECAR_MODE, SIDECAR_PORT } from "./types";
 
 const SHUTDOWN_TIMEOUT_MS = 5_000;
@@ -185,6 +186,9 @@ async function main(desktopCliPath?: string) {
 		void shutdown("code_sidecar_before_exit");
 	});
 
+	// Smoke-only hooks for scripts/smoke-remote-cache-live.ts. No-op unless
+	// CLINE_SMOKE_REMOTE_CACHE is set, so production behaviour is untouched.
+	registerSmokeRemoteCacheCommands(ctx);
 	const { port, approvalToken } = startServer(ctx, SIDECAR_PORT, shutdown);
 	observability.logger.log("Desktop sidecar ready", {
 		port,

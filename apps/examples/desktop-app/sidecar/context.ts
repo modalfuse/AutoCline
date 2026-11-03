@@ -32,6 +32,7 @@ import {
 } from "./feature-flags";
 import { recordHubActivity } from "./hub-admin";
 import { sessionLogPath } from "./paths";
+import { invalidateRemoteCache } from "./session-data/remote-cache";
 import type {
 	LiveSession,
 	PendingAskQuestion,
@@ -1501,6 +1502,9 @@ export async function disconnectRemoteSessionRuntime(
 		ctx.runtimeBindings.delete(environmentId);
 		await disposeRuntimeBinding(binding, "code_sidecar_remote_disconnect");
 	}
+	// Drop the environment's cached transcripts: reconnecting may land on a
+	// different host revision, and a stale body would shadow it on first open.
+	invalidateRemoteCache(environmentId);
 	if (ctx.activeEnvironmentId === environmentId) {
 		ctx.activeEnvironmentId = LOCAL_ENVIRONMENT_ID;
 	}

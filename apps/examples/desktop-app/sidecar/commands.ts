@@ -203,6 +203,8 @@ import {
 	readPersistedChatMessages,
 	readSessionMessages,
 } from "./session-data/messages";
+import { invalidateRemoteCache } from "./session-data/remote-cache";
+import { readRemoteSessionSwa } from "./session-data/remote-session-swa";
 import { searchWorkspaceFiles } from "./session-data/search";
 import {
 	getCommitDetails,
@@ -2312,18 +2314,90 @@ export async function handleCommand(
 		if (binding?.kind !== "ssh") {
 			return await readSessionMessages(ctx, sessionId, maxMessages);
 		}
-		const [remoteMessages, remoteSession] = await Promise.all([
-			binding.sessionManager.readMessages(sessionId),
+		// Stale-while-revalidate: a warm remote-cache entry lets the transcript
+		// render immediately instead of blocking the sidebar on a full Hub pull.
+		// The Hub stays authoritative — a background refresh republishes when it
+		// finds newer content, and the cached bodies never touch the local
+		// session store.
+		const swr = await readRemoteSessionSwa({
+			environmentId: binding.environmentId,
+			sessionId,
+			fetchMessages: (id) => binding.sessionManager.readMessages(id),
+			logger: ctx.logger,
+			onRefreshed: (messages, meta) => {
+				broadcastEvent(ctx, "remote_session_messages_refreshed", {
+					environmentId: binding.environmentId,
+					sessionId,
+					updatedAt: meta.updatedAt,
+					messageCount: messages.length,
+					fromCache: true,
+				});
+			},
+		});
+		const workspaceRoot = () => {
 			// Only refines mention chips, so a failed lookup must not fail the read.
-			binding.sessionManager.get(sessionId).catch(() => undefined),
-		]);
+			return binding.sessionManager
+				.get(sessionId)
+				.then((remoteSession) =>
+					remoteSession
+						? remoteSession.workspaceRoot || remoteSession.cwd || undefined
+						: undefined,
+				)
+				.catch(() => undefined);
+		};
+		await swr.refresh;
 		return await readSessionMessages(
 			ctx,
 			sessionId,
 			maxMessages,
-			remoteMessages,
-			remoteSession?.workspaceRoot || remoteSession?.cwd || undefined,
+			swr.messages,
+			await workspaceRoot(),
 		);
+	}
+	// ── Smoke-only hooks (scripts/smoke-remote-cache-live.ts) ─────────
+	if (command.startsWith("smoke_")) {
+		const smoke = ctx.smokeRemoteCache;
+		if (!smoke) {
+			throw new Error(
+				`${command} is only available with CLINE_SMOKE_REMOTE_CACHE=1`,
+			);
+		}
+		switch (command) {
+			case "smoke_bind_remote_environment":
+				return await smoke.bindRemoteEnvironment({
+					environmentId: String(args?.environmentId ?? ""),
+					endpoint: String(args?.endpoint ?? ""),
+					workspaceRoot: String(args?.workspaceRoot ?? ""),
+					sessionIds: Array.isArray(args?.sessionIds)
+						? (args.sessionIds as string[])
+						: [],
+				});
+			case "smoke_set_remote_hub_reachable":
+				return await smoke.setRemoteHubReachable({
+					environmentId: String(args?.environmentId ?? ""),
+					reachable: args?.reachable === true,
+				});
+			case "smoke_append_hub_message":
+				return await smoke.appendHubMessage({
+					environmentId: String(args?.environmentId ?? ""),
+					sessionId: String(args?.sessionId ?? ""),
+					text: String(args?.text ?? ""),
+				});
+			case "smoke_wait_for_refresh":
+				return await smoke.waitForRefresh({
+					environmentId: String(args?.environmentId ?? ""),
+					sessionId: String(args?.sessionId ?? ""),
+					timeoutMs:
+						typeof args?.timeoutMs === "number" ? args.timeoutMs : undefined,
+				});
+			case "smoke_remote_cache_path":
+				return smoke.remoteCachePath({
+					environmentId: String(args?.environmentId ?? ""),
+					sessionId: String(args?.sessionId ?? ""),
+				});
+			default:
+				throw new Error(`unknown smoke command: ${command}`);
+		}
 	}
 	if (command === "read_session_hooks") {
 		const sessionId = String(args?.sessionId ?? "").trim();
@@ -2865,6 +2939,8 @@ export async function handleCommand(
 		ctx.liveSessions.delete(sessionId);
 		ctx.sessionEnvironmentIds.delete(sessionId);
 		if (binding?.kind === "ssh") {
+			// A deleted remote session must not resurface from the SWR cache.
+			invalidateRemoteCache(binding.environmentId, sessionId);
 			if (!deleted && deleteError) throw deleteError;
 			if (deleted) {
 				broadcastEvent(ctx, "session_deleted", {
