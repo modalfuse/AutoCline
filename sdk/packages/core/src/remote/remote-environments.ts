@@ -162,7 +162,7 @@ interface PendingHubCleanup {
 	discoveryPath: string;
 }
 
-interface SharedHubCredential {
+export interface SharedHubCredential {
 	endpoint: string;
 	authToken: string;
 	home: string;
@@ -623,6 +623,14 @@ export class RemoteEnvironmentService {
 		}
 		this.activeProfileId = id;
 		return true;
+	}
+
+	/** Last verified shared-Hub auth for a hubUrls profile (memory or disk). */
+	public async peekSharedHubCredential(
+		id: string,
+	): Promise<SharedHubCredential | undefined> {
+		await this.hydrateSharedHubCredentials();
+		return this.sharedHubCredentialCache.get(id);
 	}
 
 	public getStatuses(): RemoteEnvironmentStatus[] {

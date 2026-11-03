@@ -31,7 +31,8 @@ export type RemoteEnvironmentTestResult = {
 
 export type RemoteEnvironmentConnectResult = {
 	profile: RemoteEnvironmentProfile;
-	status: "connected";
+	/** "connecting" = optimistic activate; Hub/SSH finish in the background. */
+	status: "connected" | "connecting";
 	environmentId: string;
 	activeEnvironmentId: string;
 	activeProfileId: string;

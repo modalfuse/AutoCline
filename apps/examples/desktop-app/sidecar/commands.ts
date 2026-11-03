@@ -205,7 +205,11 @@ import {
 	readPersistedChatMessages,
 	readSessionMessages,
 } from "./session-data/messages";
-import { invalidateRemoteCache } from "./session-data/remote-cache";
+import {
+	invalidateRemoteCache,
+	listCachedRemoteSessions,
+	writeRemoteSessionIndex,
+} from "./session-data/remote-cache";
 import { readRemoteSessionSwa } from "./session-data/remote-session-swa";
 import { searchWorkspaceFiles } from "./session-data/search";
 import {
@@ -766,6 +770,39 @@ async function listSessionsFromSidecarManager(
 		} catch {
 			// Keep history available from the other connected environments.
 		}
+		if (binding.kind === "ssh") {
+			const remoteRows = [...byId.values()].filter(
+				(row) => row.environmentId === binding.environmentId,
+			);
+			writeRemoteSessionIndex(
+				binding.environmentId,
+				remoteRows.map((row) => ({
+					sessionId: String(row.sessionId ?? ""),
+					prompt: typeof row.prompt === "string" ? row.prompt : undefined,
+					startedAt:
+						typeof row.startedAt === "string" ? row.startedAt : undefined,
+					updatedAt:
+						typeof row.updatedAt === "string"
+							? row.updatedAt
+							: typeof row.startedAt === "string"
+								? row.startedAt
+								: undefined,
+					provider:
+						typeof row.provider === "string" ? row.provider : undefined,
+					model: typeof row.model === "string" ? row.model : undefined,
+					cwd: typeof row.cwd === "string" ? row.cwd : undefined,
+					workspaceRoot:
+						typeof row.workspaceRoot === "string"
+							? row.workspaceRoot
+							: undefined,
+					status: typeof row.status === "string" ? row.status : undefined,
+					metadata:
+						row.metadata && typeof row.metadata === "object"
+							? (row.metadata as JsonRecord)
+							: undefined,
+				})),
+			);
+		}
 	}
 
 	if (byId.size === 0) {
@@ -822,6 +859,35 @@ async function listSessionsFromSidecarManager(
 			});
 		}
 	}
+	const remoteIds = new Set<string>();
+	if (
+		ctx.activeEnvironmentId &&
+		ctx.activeEnvironmentId !== LOCAL_ENVIRONMENT_ID
+	) {
+		remoteIds.add(ctx.activeEnvironmentId);
+	}
+	try {
+		for (const profile of await getRemoteEnvironmentService(ctx).list()) {
+			if ((profile.hubUrls?.length ?? 0) > 0 || profile.hubUrl) {
+				remoteIds.add(profile.id);
+			}
+		}
+	} catch {
+		// Profile read failures must not blank the sidebar.
+	}
+	for (const environmentId of remoteIds) {
+		if (ctx.runtimeBindings.get(environmentId)?.kind === "ssh") {
+			continue; // live list above is authoritative
+		}
+		for (const cached of listCachedRemoteSessions(environmentId, max)) {
+			const sessionId = String(cached.sessionId ?? "").trim();
+			if (!sessionId) continue;
+			const key = JSON.stringify([environmentId, sessionId]);
+			if (byId.has(key)) continue;
+			byId.set(key, cached);
+		}
+	}
+
 	return Array.from(byId.values())
 		.sort((left, right) => {
 			const leftTime = Date.parse(
@@ -2074,84 +2140,172 @@ export async function handleCommand(
 				ctx.runtimeBindings.get(previousEnvironmentId)?.kind === "ssh"
 					? previousEnvironmentId
 					: undefined;
-			const targetWasConnected = Boolean(service.getConnection(id));
-			let connection: RemoteEnvironmentConnection | undefined;
-			let runtimeCommitted = false;
 
-			try {
-				connection = await service.connect(id);
-				await connectRemoteSessionRuntime(ctx, connection);
-				runtimeCommitted = true;
-				const currentConnection = service.getConnection(id);
-				if (
-					!currentConnection ||
-					currentConnection.endpoint !== connection.endpoint
-				) {
-					throw new Error(
-						`Remote environment ${id} disconnected during initialization.`,
-					);
+			// Already connected: reuse instantly (no SSH).
+			const existingConnection = service.getConnection(id);
+			if (existingConnection) {
+				if (!ctx.runtimeBindings.get(id)) {
+					await connectRemoteSessionRuntime(ctx, existingConnection);
+				} else {
+					service.activateConnection(id);
+					ctx.activeEnvironmentId = id;
 				}
-			} catch (error) {
-				if (runtimeCommitted && previousEnvironmentId !== id) {
-					await disconnectRemoteSessionRuntime(ctx, id);
-				}
-				if (!targetWasConnected && service.getConnection(id)) {
-					await service.disconnect(id).catch((disconnectError) => {
-						ctx.logger?.log("Failed to roll back SSH connection", {
-							error: disconnectError,
-							environmentId: id,
-							severity: "warn",
-						});
-					});
-				}
-				const rollbackProfileId =
-					previousRuntimeProfileId &&
-					service.getConnection(previousRuntimeProfileId)
-						? previousRuntimeProfileId
-						: previousServiceProfileId;
-				if (rollbackProfileId) {
-					service.activateConnection(rollbackProfileId);
-				}
-				ctx.activeEnvironmentId = ctx.runtimeBindings.has(previousEnvironmentId)
-					? previousEnvironmentId
-					: LOCAL_ENVIRONMENT_ID;
-				throw error;
+				const result = {
+					profile: existingConnection.profile,
+					status: "connected" as const,
+					environmentId: id,
+					activeEnvironmentId: id,
+					activeProfileId: id,
+					workspaceRoot: existingConnection.workspaceRoot,
+					homeDir: existingConnection.homeDir,
+					remotePlatform: existingConnection.platform,
+					remoteArch: existingConnection.arch,
+				};
+				broadcastEvent(ctx, "remote_environment_changed", result);
+				return result;
 			}
 
-			if (!connection) {
-				throw new Error(`Remote environment ${id} failed to connect.`);
-			}
+			const cached = await service.peekSharedHubCredential(id);
+			const statusHome = service
+				.getStatuses()
+				.find((item) => item.profileId === id)?.remoteHome;
+			const optimisticHome =
+				cached?.home?.trim() ||
+				statusHome?.trim() ||
+				"";
+			const optimisticWorkspace =
+				optimisticHome ||
+				(typeof targetProfile?.name === "string" ? "" : "");
 
-			const previousProfileIds = new Set(
-				[previousRuntimeProfileId, previousServiceProfileId].filter(
-					(profileId): profileId is string =>
-						Boolean(profileId) && profileId !== id,
-				),
-			);
-			for (const previousProfileId of previousProfileIds) {
-				await disconnectRemoteSessionRuntime(ctx, previousProfileId);
-				await service.disconnect(previousProfileId).catch((disconnectError) => {
-					ctx.logger?.log("Failed to clean up previous SSH connection", {
-						error: disconnectError,
-						environmentId: previousProfileId,
-						severity: "warn",
-					});
-				});
-			}
-
-			const result = {
-				profile: connection.profile,
-				status: "connected" as const,
+			// Optimistic activate: UI can paint cached sessions immediately.
+			ctx.activeEnvironmentId = id;
+			const connectingResult = {
+				profile: targetProfile ?? {
+					id,
+					name: id,
+					host: id,
+					createdAt: new Date().toISOString(),
+					updatedAt: new Date().toISOString(),
+				},
+				status: "connecting" as const,
 				environmentId: id,
 				activeEnvironmentId: id,
 				activeProfileId: id,
-				workspaceRoot: connection.workspaceRoot,
-				homeDir: connection.homeDir,
-				remotePlatform: connection.platform,
-				remoteArch: connection.arch,
+				workspaceRoot: optimisticWorkspace || optimisticHome || "/",
+				homeDir: optimisticHome || "/",
+				remotePlatform: cached?.platform,
+				remoteArch: cached?.arch,
 			};
-			broadcastEvent(ctx, "remote_environment_changed", result);
-			return result;
+			broadcastEvent(ctx, "remote_environment_changed", connectingResult);
+
+			const waitUntilConnected = args?.waitUntilConnected === true;
+			const background = (async () => {
+				let connection: RemoteEnvironmentConnection | undefined;
+				let runtimeCommitted = false;
+				try {
+					connection = await service.connect(id);
+					await connectRemoteSessionRuntime(ctx, connection);
+					runtimeCommitted = true;
+					const currentConnection = service.getConnection(id);
+					if (
+						!currentConnection ||
+						currentConnection.endpoint !== connection.endpoint
+					) {
+						throw new Error(
+							`Remote environment ${id} disconnected during initialization.`,
+						);
+					}
+
+					const previousProfileIds = new Set(
+						[previousRuntimeProfileId, previousServiceProfileId].filter(
+							(profileId): profileId is string =>
+								Boolean(profileId) && profileId !== id,
+						),
+					);
+					for (const previousProfileId of previousProfileIds) {
+						await disconnectRemoteSessionRuntime(ctx, previousProfileId);
+						await service
+							.disconnect(previousProfileId)
+							.catch((disconnectError) => {
+								ctx.logger?.log(
+									"Failed to clean up previous SSH connection",
+									{
+										error: disconnectError,
+										environmentId: previousProfileId,
+										severity: "warn",
+									},
+								);
+							});
+					}
+
+					const result = {
+						profile: connection.profile,
+						status: "connected" as const,
+						environmentId: id,
+						activeEnvironmentId: id,
+						activeProfileId: id,
+						workspaceRoot: connection.workspaceRoot,
+						homeDir: connection.homeDir,
+						remotePlatform: connection.platform,
+						remoteArch: connection.arch,
+					};
+					broadcastEvent(ctx, "remote_environment_changed", result);
+					return result;
+				} catch (error) {
+					if (runtimeCommitted && previousEnvironmentId !== id) {
+						await disconnectRemoteSessionRuntime(ctx, id);
+					}
+					if (service.getConnection(id)) {
+						await service.disconnect(id).catch((disconnectError) => {
+							ctx.logger?.log("Failed to roll back SSH connection", {
+								error: disconnectError,
+								environmentId: id,
+								severity: "warn",
+							});
+						});
+					}
+					const rollbackProfileId =
+						previousRuntimeProfileId &&
+						service.getConnection(previousRuntimeProfileId)
+							? previousRuntimeProfileId
+							: previousServiceProfileId;
+					if (rollbackProfileId) {
+						service.activateConnection(rollbackProfileId);
+					}
+					if (ctx.activeEnvironmentId === id) {
+						ctx.activeEnvironmentId = ctx.runtimeBindings.has(
+							previousEnvironmentId,
+						)
+							? previousEnvironmentId
+							: LOCAL_ENVIRONMENT_ID;
+					}
+					broadcastEvent(ctx, "remote_environment_changed", {
+						status: "error",
+						environmentId: id,
+						activeEnvironmentId: ctx.activeEnvironmentId,
+						activeProfileId:
+							ctx.activeEnvironmentId === LOCAL_ENVIRONMENT_ID
+								? null
+								: ctx.activeEnvironmentId,
+						message:
+							error instanceof Error ? error.message : String(error),
+					});
+					throw error;
+				}
+			})();
+
+			if (waitUntilConnected) {
+				return await background;
+			}
+
+			void background.catch((error) => {
+				ctx.logger?.log("Background remote connect failed", {
+					error,
+					environmentId: id,
+					severity: "warn",
+				});
+			});
+			return connectingResult;
 		});
 	}
 	if (command === "disconnect_remote_environment") {

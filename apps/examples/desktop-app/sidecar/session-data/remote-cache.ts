@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
 	renameSync,
 	rmSync,
@@ -198,6 +199,190 @@ export function invalidateRemoteCache(
 		? remoteCacheDir(env, sessionId)
 		: join(remoteCacheRootDir(), sanitizeCacheSegment(env));
 	return removeDirIfExists(target);
+}
+
+/** Per-environment sidebar index written after a live Hub list. */
+export type RemoteSessionIndexEntry = {
+	sessionId: string;
+	prompt?: string;
+	startedAt?: string;
+	updatedAt?: string;
+	provider?: string;
+	model?: string;
+	cwd?: string;
+	workspaceRoot?: string;
+	status?: string;
+	metadata?: JsonRecord;
+};
+
+export function remoteSessionIndexPath(environmentId: string): string {
+	return join(
+		remoteCacheRootDir(),
+		sanitizeCacheSegment(environmentId),
+		"sessions-index.json",
+	);
+}
+
+export function writeRemoteSessionIndex(
+	environmentId: string,
+	sessions: RemoteSessionIndexEntry[],
+): void {
+	const env = environmentId.trim();
+	if (!env) return;
+	const dir = join(remoteCacheRootDir(), sanitizeCacheSegment(env));
+	mkdirSync(dir, { recursive: true });
+	writeJsonAtomic(remoteSessionIndexPath(env), {
+		version: REMOTE_CACHE_VERSION,
+		environmentId: env,
+		updatedAt: Date.now(),
+		sessions,
+	});
+}
+
+export function readRemoteSessionIndex(
+	environmentId: string,
+): RemoteSessionIndexEntry[] {
+	const env = environmentId.trim();
+	if (!env) return [];
+	const raw = readJsonObject(remoteSessionIndexPath(env));
+	if (!raw || !Array.isArray(raw.sessions)) return [];
+	return raw.sessions.flatMap((item) => {
+		if (!item || typeof item !== "object") return [];
+		const record = item as JsonRecord;
+		const sessionId = String(record.sessionId ?? "").trim();
+		if (!sessionId) return [];
+		return [
+			{
+				sessionId,
+				prompt: typeof record.prompt === "string" ? record.prompt : undefined,
+				startedAt:
+					typeof record.startedAt === "string" ? record.startedAt : undefined,
+				updatedAt:
+					typeof record.updatedAt === "string" ? record.updatedAt : undefined,
+				provider:
+					typeof record.provider === "string" ? record.provider : undefined,
+				model: typeof record.model === "string" ? record.model : undefined,
+				cwd: typeof record.cwd === "string" ? record.cwd : undefined,
+				workspaceRoot:
+					typeof record.workspaceRoot === "string"
+						? record.workspaceRoot
+						: undefined,
+				status: typeof record.status === "string" ? record.status : undefined,
+				metadata:
+					record.metadata && typeof record.metadata === "object"
+						? (record.metadata as JsonRecord)
+						: undefined,
+			},
+		];
+	});
+}
+
+/**
+ * Build sidebar rows from the last Hub list and/or on-disk transcript caches.
+ * Used when switching to a hubUrls host before SSH/Hub connect finishes.
+ */
+export function listCachedRemoteSessions(
+	environmentId: string,
+	limit = 300,
+): JsonRecord[] {
+	const env = environmentId.trim();
+	if (!env) return [];
+	const max = Math.max(1, Math.floor(limit));
+	const byId = new Map<string, JsonRecord>();
+
+	for (const entry of readRemoteSessionIndex(env)) {
+		const prompt = entry.prompt?.trim() ?? "";
+		if (!prompt) continue;
+		byId.set(entry.sessionId, {
+			sessionId: entry.sessionId,
+			environmentId: env,
+			prompt,
+			startedAt: entry.startedAt ?? "",
+			updatedAt: entry.updatedAt ?? entry.startedAt ?? "",
+			provider: entry.provider ?? "",
+			model: entry.model ?? "",
+			cwd: entry.cwd ?? entry.workspaceRoot ?? "",
+			workspaceRoot: entry.workspaceRoot ?? entry.cwd ?? "",
+			status: entry.status ?? "idle",
+			...(entry.metadata ? { metadata: entry.metadata } : {}),
+			remoteEnvironment: { id: env },
+			fromRemoteCache: true,
+		});
+	}
+
+	const root = join(remoteCacheRootDir(), sanitizeCacheSegment(env));
+	if (existsSync(root)) {
+		for (const name of readdirSync(root)) {
+			if (name === "sessions-index.json" || name.startsWith(".")) continue;
+			const snapshot = readRemoteCache(env, name);
+			if (!snapshot || snapshot.messages.length === 0) continue;
+			const existing = byId.get(name);
+			if (existing && isNonEmptyPrompt(existing.prompt)) continue;
+			const prompt = derivePromptFromCachedMessages(snapshot.messages);
+			if (!prompt) continue;
+			byId.set(name, {
+				...(existing ?? {}),
+				sessionId: name,
+				environmentId: env,
+				prompt,
+				startedAt:
+					typeof existing?.startedAt === "string" && existing.startedAt
+						? existing.startedAt
+						: new Date(snapshot.updatedAt || snapshot.fetchedAt).toISOString(),
+				updatedAt: new Date(
+					snapshot.updatedAt || snapshot.fetchedAt,
+				).toISOString(),
+				provider: existing?.provider ?? "",
+				model: existing?.model ?? "",
+				cwd: existing?.cwd ?? existing?.workspaceRoot ?? "",
+				workspaceRoot: existing?.workspaceRoot ?? existing?.cwd ?? "",
+				status: existing?.status ?? "idle",
+				remoteEnvironment: { id: env },
+				fromRemoteCache: true,
+			});
+		}
+	}
+
+	return Array.from(byId.values())
+		.sort((left, right) => {
+			const leftTime = Date.parse(
+				String(left.updatedAt ?? left.startedAt ?? ""),
+			);
+			const rightTime = Date.parse(
+				String(right.updatedAt ?? right.startedAt ?? ""),
+			);
+			return (
+				(Number.isNaN(rightTime) ? 0 : rightTime) -
+				(Number.isNaN(leftTime) ? 0 : leftTime)
+			);
+		})
+		.slice(0, max);
+}
+
+function isNonEmptyPrompt(value: unknown): boolean {
+	return typeof value === "string" && Boolean(value.trim());
+}
+
+function derivePromptFromCachedMessages(messages: unknown[]): string {
+	for (const message of messages) {
+		if (!message || typeof message !== "object") continue;
+		const record = message as JsonRecord;
+		if (record.role !== "user") continue;
+		const content = record.content;
+		if (typeof content === "string" && content.trim()) {
+			return content.trim().split("\n")[0]?.trim() ?? "";
+		}
+		if (Array.isArray(content)) {
+			for (const part of content) {
+				if (!part || typeof part !== "object") continue;
+				const text = (part as JsonRecord).text;
+				if (typeof text === "string" && text.trim()) {
+					return text.trim().split("\n")[0]?.trim() ?? "";
+				}
+			}
+		}
+	}
+	return "";
 }
 
 // ---------------------------------------------------------------------------

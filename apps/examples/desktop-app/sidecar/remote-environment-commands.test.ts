@@ -181,6 +181,7 @@ function createFakeService(
 			return true;
 		}),
 		getStatuses: vi.fn(() => []),
+		peekSharedHubCredential: vi.fn(async () => undefined),
 	} as unknown as RemoteEnvironmentService;
 	return {
 		service,
@@ -351,7 +352,7 @@ describe("remote environment command routing", () => {
 		ctx.remoteEnvironments = fake.service;
 
 		await expect(
-			handleCommand(ctx, "connect_remote_environment", { id: sshOnly.id }),
+			handleCommand(ctx, "connect_remote_environment", { waitUntilConnected: true, id: sshOnly.id }),
 		).rejects.toThrow(/no hubUrls|Tried: \(none configured\)/);
 		// Nothing was attempted: no SSH connect, no Hub runtime.
 		expect(fake.connect).not.toHaveBeenCalled();
@@ -369,7 +370,7 @@ describe("remote environment command routing", () => {
 		const send = attachEventRecorder(ctx);
 
 		await expect(
-			handleCommand(ctx, "connect_remote_environment", {
+			handleCommand(ctx, "connect_remote_environment", { waitUntilConnected: true,
 				id: profile.id,
 			}),
 		).resolves.toEqual({
@@ -414,7 +415,8 @@ describe("remote environment command routing", () => {
 			workspaceRoot: connection.workspaceRoot,
 			remote: connection,
 		});
-		expect(readEvent(send, 0)).toEqual({
+		expect(readEvent(send, 0).event.payload.status).toBe("connecting");
+		expect(readEvent(send, 1)).toEqual({
 			type: "event",
 			event: {
 				name: "remote_environment_changed",
@@ -448,7 +450,7 @@ describe("remote environment command routing", () => {
 		expect(hubDisposeMock).toHaveBeenCalledOnce();
 		expect(ctx.runtimeBindings.has(profile.id)).toBe(false);
 		expect(ctx.activeEnvironmentId).toBe("local");
-		expect(readEvent(send, 1)).toEqual({
+		expect(readEvent(send, 2)).toEqual({
 			type: "event",
 			event: {
 				name: "remote_environment_changed",
@@ -475,7 +477,7 @@ describe("remote environment command routing", () => {
 		const send = attachEventRecorder(ctx);
 
 		await expect(
-			handleCommand(ctx, "connect_remote_environment", { id: profile.id }),
+			handleCommand(ctx, "connect_remote_environment", { waitUntilConnected: true, id: profile.id }),
 		).rejects.toThrow("remote auth rejected");
 
 		expect(fake.disconnect).toHaveBeenCalledWith(profile.id);
@@ -486,7 +488,13 @@ describe("remote environment command routing", () => {
 		expect(hubDisposeMock).toHaveBeenCalledOnce();
 		expect(ctx.runtimeBindings.has(profile.id)).toBe(false);
 		expect(ctx.activeEnvironmentId).toBe("local");
-		expect(send).not.toHaveBeenCalled();
+		expect(readEvent(send, 0).event.payload.status).toBe("connecting");
+		expect(readEvent(send, 1).event.payload).toMatchObject({
+			status: "error",
+			environmentId: profile.id,
+			activeEnvironmentId: "local",
+			message: "remote auth rejected",
+		});
 	});
 
 	it("preserves the previous environment when switching hosts fails", async () => {
@@ -502,7 +510,7 @@ describe("remote environment command routing", () => {
 		ctx.remoteEnvironments = fake.service;
 		const send = attachEventRecorder(ctx);
 
-		await handleCommand(ctx, "connect_remote_environment", { id: profile.id });
+		await handleCommand(ctx, "connect_remote_environment", { waitUntilConnected: true, id: profile.id });
 		const firstBinding = ctx.runtimeBindings.get(profile.id);
 		send.mockClear();
 		hubConnectMock.mockRejectedValueOnce(
@@ -510,7 +518,7 @@ describe("remote environment command routing", () => {
 		);
 
 		await expect(
-			handleCommand(ctx, "connect_remote_environment", {
+			handleCommand(ctx, "connect_remote_environment", { waitUntilConnected: true,
 				id: secondProfile.id,
 			}),
 		).rejects.toThrow("second host auth rejected");
@@ -527,7 +535,13 @@ describe("remote environment command routing", () => {
 		expect(failedRuntime.manager.dispose).toHaveBeenCalledWith(
 			"code_sidecar_remote_initialization_failed",
 		);
-		expect(send).not.toHaveBeenCalled();
+		expect(readEvent(send, 0).event.payload.status).toBe("connecting");
+		expect(readEvent(send, 1).event.payload).toMatchObject({
+			status: "error",
+			environmentId: secondProfile.id,
+			activeEnvironmentId: profile.id,
+			message: "second host auth rejected",
+		});
 
 		await expect(
 			handleCommand(ctx, "list_remote_environments"),
@@ -549,9 +563,9 @@ describe("remote environment command routing", () => {
 		const ctx = createSidecarContext("/local/project");
 		ctx.remoteEnvironments = fake.service;
 
-		await handleCommand(ctx, "connect_remote_environment", { id: profile.id });
+		await handleCommand(ctx, "connect_remote_environment", { waitUntilConnected: true, id: profile.id });
 		await expect(
-			handleCommand(ctx, "connect_remote_environment", {
+			handleCommand(ctx, "connect_remote_environment", { waitUntilConnected: true,
 				id: secondProfile.id,
 			}),
 		).resolves.toMatchObject({
