@@ -17,6 +17,7 @@ import {
 	type ButtonVariant,
 	buttonVariants,
 	IconButton,
+	type IconButtonProps,
 	iconButtonVariants,
 } from "../components/button.js";
 import { Switch } from "../components/switch.js";
@@ -113,15 +114,136 @@ const buttonLayouts: [string, ButtonProps, ReactNode][] = [
 	["wrapped", {}, h("span", { "data-icon": "leading" }, unmanagedIcon())],
 	["nested", {}, h("span", null, unmanagedIcon("leading"))],
 ];
-const matrix = variants.flatMap((variant) =>
-	tones.map((tone) =>
-		h(
-			Button,
-			{ id: `${variant}-${tone}`, key: `${variant}-${tone}`, tone, variant },
-			`${variant} ${tone}`,
-		),
+function button(id: string, props: ButtonProps = {}, children: ReactNode = id) {
+	return h(Button, { id, key: id, ...props }, children);
+}
+function iconButton(
+	id: string,
+	props: Omit<IconButtonProps, "aria-label"> = {},
+	children?: ReactNode,
+) {
+	return h(
+		IconButton,
+		{ id, key: id, "aria-label": id, icon: FixtureIcon, ...props },
+		children,
+	);
+}
+const fixtures = [
+	...variants.flatMap((variant) =>
+		tones.map((tone) => button(`${variant}-${tone}`, { variant, tone })),
 	),
-);
+	...sizes.flatMap(({ size }) => [
+		...(["button", "icon"] as const).flatMap((kind) =>
+			[false, true].map((override) =>
+				h(
+					"button",
+					{
+						id: `helper-${kind}-${size}${override ? "-override" : ""}`,
+						key: `helper-${kind}-${size}-${override}`,
+						type: "button",
+						"aria-label": "Helper icon",
+						className: (kind === "button"
+							? buttonVariants
+							: iconButtonVariants)({ size }),
+					},
+					unmanagedIcon(undefined, override ? "size-6" : undefined),
+				),
+			),
+		),
+		...buttonLayouts.map(([layout, props, content]) =>
+			button(`${layout}-${size}`, { size, ...props }, content),
+		),
+		iconButton(`icon-${size}`, { size }),
+		iconButton(
+			`legacy-icon-${size}`,
+			{ size, icon: undefined },
+			unmanagedIcon(),
+		),
+	]),
+	...(["accent", "neutral"] as const).map((tone) =>
+		h(Switch, {
+			id: `switch-${tone}`,
+			key: tone,
+			tone,
+			defaultChecked: true,
+			"aria-label": `${tone} switch`,
+		}),
+	),
+	iconButton("icon"),
+	button("legacy-size-override", {}, unmanagedIcon(undefined, "size-6")),
+	iconButton(
+		"legacy-icon-size-override",
+		{ icon: undefined },
+		unmanagedIcon(undefined, "size-6"),
+	),
+	iconButton(
+		"legacy-link",
+		{ asChild: true, icon: undefined },
+		h("a", { id: "legacy-icon-link", href: "#example" }, unmanagedIcon()),
+	),
+	button(
+		"managed-with-preview",
+		{ leadingIcon: FixtureIcon },
+		h("span", null, unmanagedIcon()),
+	),
+	button("override", {
+		className: "h-7 px-0 gap-0 whitespace-normal",
+		leadingIcon: FixtureIcon,
+		trailingIcon: FixtureIcon,
+		style: { "--cline-ui-button-icon-size": "20px" } as CSSProperties,
+	}),
+	iconButton("icon-override", {
+		className: "size-6",
+		style: { "--cline-ui-button-icon-size": "18px" } as CSSProperties,
+	}),
+	button("no-scale", { pressScale: false }),
+	button("custom-scale", { pressScale: 0.94 }),
+	button("disabled", { disabled: true }),
+	button("hidden-button", { hidden: true, className: "inline-flex" }),
+	iconButton("hidden-icon-button", { hidden: true }),
+	h(
+		Badge,
+		{
+			id: "hidden-badge",
+			key: "hidden-badge",
+			hidden: true,
+			interactive: true,
+		},
+		"Hidden badge",
+	),
+	button(
+		"hidden-link-wrapper",
+		{ asChild: true, hidden: true },
+		h("a", { id: "hidden-link", href: "#example" }, "Hidden link"),
+	),
+	button("until-found", { hidden: true }),
+	button(
+		"link-wrapper",
+		{ asChild: true, variant: "ghost", trailingIcon: FixtureIcon },
+		h("a", { id: "link", href: "#example" }, "Link"),
+	),
+	button("padding-vars", {
+		style: { "--cline-ui-button-padding-inline": "11px" } as CSSProperties,
+	}),
+	button("edge-vars", {
+		leadingIcon: FixtureIcon,
+		trailingIcon: FixtureIcon,
+		style: {
+			"--cline-ui-button-leading-padding": "6px",
+			"--cline-ui-button-trailing-padding": "9px",
+		} as CSSProperties,
+	}),
+	h(
+		"button",
+		{
+			id: "helper",
+			key: "helper",
+			type: "button",
+			className: buttonVariants({ variant: "secondary", tone: "neutral" }),
+		},
+		"Variant helper",
+	),
+];
 const fixture = renderToStaticMarkup(
 	h(
 		"div",
@@ -146,169 +268,7 @@ const fixture = renderToStaticMarkup(
 					backgroundColor: "var(--surface-1)",
 				},
 			},
-			...matrix,
-			...sizes.flatMap(({ size }) =>
-				(["button", "icon"] as const).flatMap((kind) =>
-					([false, true] as const).map((override) =>
-						h(
-							"button",
-							{
-								id: `helper-${kind}-${size}${override ? "-override" : ""}`,
-								key: `helper-${kind}-${size}-${override}`,
-								type: "button",
-								"aria-label": "Helper icon",
-								className: (kind === "button"
-									? buttonVariants
-									: iconButtonVariants)({ size }),
-							},
-							unmanagedIcon(undefined, override ? "size-6" : undefined),
-						),
-					),
-				),
-			),
-			...(["accent", "neutral"] as const).map((tone) =>
-				h(Switch, {
-					id: `switch-${tone}`,
-					key: tone,
-					tone,
-					defaultChecked: true,
-					"aria-label": `${tone} switch`,
-				}),
-			),
-			...sizes.flatMap(({ size }) => [
-				...buttonLayouts.map(([layout, props, content]) =>
-					h(
-						Button,
-						{
-							id: `${layout}-${size}`,
-							key: `${layout}-${size}`,
-							size,
-							...props,
-						},
-						content,
-					),
-				),
-				...([false, true] as const).map((legacy) =>
-					h(
-						IconButton,
-						{
-							id: `${legacy ? "legacy-icon" : "icon"}-${size}`,
-							key: `${legacy ? "legacy-icon" : "icon"}-${size}`,
-							size,
-							"aria-label": "Add",
-							icon: legacy ? undefined : FixtureIcon,
-						},
-						legacy ? unmanagedIcon() : null,
-					),
-				),
-			]),
-			h(IconButton, { id: "icon", "aria-label": "Add", icon: FixtureIcon }),
-			h(
-				Button,
-				{ id: "legacy-size-override" },
-				unmanagedIcon(undefined, "size-6"),
-				"Custom child icon size",
-			),
-			h(
-				IconButton,
-				{ id: "legacy-icon-size-override", "aria-label": "Custom child icon" },
-				unmanagedIcon(undefined, "size-6"),
-			),
-			h(
-				IconButton,
-				{ asChild: true, "aria-label": "Legacy link" },
-				h("a", { id: "legacy-icon-link", href: "#example" }, unmanagedIcon()),
-			),
-			h(
-				Button,
-				{ id: "managed-with-preview", leadingIcon: FixtureIcon },
-				h("span", null, unmanagedIcon()),
-			),
-			h(
-				Button,
-				{
-					id: "override",
-					className: "h-7 px-0 gap-0 whitespace-normal",
-					leadingIcon: FixtureIcon,
-					trailingIcon: FixtureIcon,
-					style: { "--cline-ui-button-icon-size": "20px" } as CSSProperties,
-				},
-				"Custom spacing",
-			),
-			h(IconButton, {
-				id: "icon-override",
-				"aria-label": "Custom icon",
-				className: "size-6",
-				icon: FixtureIcon,
-				style: { "--cline-ui-button-icon-size": "18px" } as CSSProperties,
-			}),
-			h(Button, { id: "no-scale", pressScale: false }, "No scaling"),
-			h(Button, { id: "custom-scale", pressScale: 0.94 }, "Custom scaling"),
-			h(Button, { id: "disabled", disabled: true }, "Disabled"),
-			h(
-				Button,
-				{ id: "hidden-button", hidden: true, className: "inline-flex" },
-				"Hidden button",
-			),
-			h(IconButton, {
-				id: "hidden-icon-button",
-				hidden: true,
-				"aria-label": "Hidden icon button",
-				icon: FixtureIcon,
-			}),
-			h(
-				Badge,
-				{
-					id: "hidden-badge",
-					hidden: true,
-					interactive: true,
-					onClick: () => {},
-				},
-				"Hidden badge",
-			),
-			h(
-				Button,
-				{ asChild: true, hidden: true },
-				h("a", { id: "hidden-link", href: "#example" }, "Hidden link"),
-			),
-			h(Button, { id: "until-found", hidden: true }, "Findable button"),
-			h(
-				Button,
-				{ asChild: true, variant: "ghost", trailingIcon: FixtureIcon },
-				h("a", { id: "link", href: "#example" }, "Link"),
-			),
-			h(
-				Button,
-				{
-					id: "padding-vars",
-					style: {
-						"--cline-ui-button-padding-inline": "11px",
-					} as CSSProperties,
-				},
-				"Padding override",
-			),
-			h(
-				Button,
-				{
-					id: "edge-vars",
-					leadingIcon: FixtureIcon,
-					trailingIcon: FixtureIcon,
-					style: {
-						"--cline-ui-button-leading-padding": "6px",
-						"--cline-ui-button-trailing-padding": "9px",
-					} as CSSProperties,
-				},
-				"Icon edge overrides",
-			),
-			h(
-				"button",
-				{
-					id: "helper",
-					type: "button",
-					className: buttonVariants({ variant: "secondary", tone: "neutral" }),
-				},
-				"Variant helper",
-			),
+			...fixtures,
 		),
 	),
 );
@@ -337,6 +297,22 @@ async function styles(page: Page, selector: string) {
 			scale: style.scale,
 		};
 	});
+}
+
+async function expectStyles(
+	page: Page,
+	selector: string,
+	expected: Partial<Awaited<ReturnType<typeof styles>>>,
+	context = selector,
+) {
+	const actual = await styles(page, selector);
+	for (const [property, value] of Object.entries(expected)) {
+		assert.equal(
+			actual[property as keyof typeof actual],
+			value,
+			`${context}/${property}`,
+		);
+	}
 }
 
 // Resolve computed properties, theme tokens, and literal colors through the
@@ -475,23 +451,22 @@ try {
 			element.setAttribute("hidden", "until-found");
 		});
 		assert.notEqual((await styles(page, "#until-found")).display, "none");
-		const ghost = await styles(page, "#ghost-neutral");
-		assert.equal(ghost.borderWidth, "0px");
-		assert.equal(ghost.background, "rgba(0, 0, 0, 0)");
-		assert.equal(ghost.fontFamily, "monospace");
-		assert.equal((await styles(page, "#icon")).padding, "0px");
-		assert.equal((await styles(page, "#link")).textDecoration, "none");
-		assert.equal((await styles(page, "#helper")).height, "36px");
-		assert.equal(
-			(await styles(page, "#padding-vars")).paddingInlineStart,
-			"11px",
-		);
-		assert.equal(
-			(await styles(page, "#padding-vars")).paddingInlineEnd,
-			"11px",
-		);
-		assert.equal((await styles(page, "#edge-vars")).paddingInlineStart, "6px");
-		assert.equal((await styles(page, "#edge-vars")).paddingInlineEnd, "9px");
+		await expectStyles(page, "#ghost-neutral", {
+			borderWidth: "0px",
+			background: "rgba(0, 0, 0, 0)",
+			fontFamily: "monospace",
+		});
+		await expectStyles(page, "#icon", { padding: "0px" });
+		await expectStyles(page, "#link", { textDecoration: "none" });
+		await expectStyles(page, "#helper", { height: "36px" });
+		await expectStyles(page, "#padding-vars", {
+			paddingInlineStart: "11px",
+			paddingInlineEnd: "11px",
+		});
+		await expectStyles(page, "#edge-vars", {
+			paddingInlineStart: "6px",
+			paddingInlineEnd: "9px",
+		});
 		for (const direction of ["ltr", "rtl"]) {
 			await page.locator(".cline-ui-theme").evaluate((element, direction) => {
 				element.setAttribute("dir", direction);
@@ -507,43 +482,34 @@ try {
 					["nested", size.padding, size.padding, size.gap],
 				] as const) {
 					const selector = `#${layout}-${size.size}`;
-					const button = await styles(page, selector);
-					const context = `${selector}/${direction}/preflight=${preflight}`;
-					assert.equal(button.height, `${size.height}px`, context);
-					assert.equal(button.paddingInlineStart, `${start}px`, context);
-					assert.equal(button.paddingInlineEnd, `${end}px`, context);
-					assert.equal(
-						button.paddingLeft,
-						`${direction === "rtl" ? end : start}px`,
-						context,
+					await expectStyles(
+						page,
+						selector,
+						{
+							height: `${size.height}px`,
+							paddingInlineStart: `${start}px`,
+							paddingInlineEnd: `${end}px`,
+							paddingLeft: `${direction === "rtl" ? end : start}px`,
+							paddingRight: `${direction === "rtl" ? start : end}px`,
+							gap: `${gap}px`,
+						},
+						`${selector}/${direction}/preflight=${preflight}`,
 					);
-					assert.equal(
-						button.paddingRight,
-						`${direction === "rtl" ? start : end}px`,
-						context,
-					);
-					assert.equal(button.gap, `${gap}px`, context);
 					checkedLayouts++;
 				}
 				for (const layout of ["unmarked", "wrapped", "nested"]) {
-					const svg = await styles(page, `#${layout}-${size.size} svg`);
-					assert.equal(
-						svg.width,
-						`${size.icon}px`,
-						`${layout} SVG width preserves the legacy size default`,
-					);
-					assert.equal(
-						svg.height,
-						`${size.icon}px`,
-						`${layout} SVG height preserves the legacy size default`,
-					);
+					await expectStyles(page, `#${layout}-${size.size} svg`, {
+						width: `${size.icon}px`,
+						height: `${size.icon}px`,
+					});
 				}
 				for (const layout of ["icon", "legacy-icon"]) {
-					const iconOnly = await styles(page, `#${layout}-${size.size}`);
-					assert.equal(iconOnly.height, `${size.height}px`);
-					assert.equal(iconOnly.width, `${size.height}px`);
-					assert.equal(iconOnly.padding, "0px");
-					assert.equal(iconOnly.gap, "0px");
+					await expectStyles(page, `#${layout}-${size.size}`, {
+						height: `${size.height}px`,
+						width: `${size.height}px`,
+						padding: "0px",
+						gap: "0px",
+					});
 					checkedLayouts++;
 				}
 				for (const [kind, expected] of [
@@ -552,10 +518,11 @@ try {
 				] as const) {
 					for (const override of [false, true]) {
 						const selector = `#helper-${kind}-${size.size}${override ? "-override" : ""} svg`;
-						const svg = await styles(page, selector);
 						const pixels = `${override ? 24 : expected}px`;
-						assert.equal(svg.width, pixels, `${selector} width`);
-						assert.equal(svg.height, pixels, `${selector} height`);
+						await expectStyles(page, selector, {
+							width: pixels,
+							height: pixels,
+						});
 					}
 				}
 				for (const [selector, expected] of [
@@ -563,48 +530,41 @@ try {
 					[`#icon-${size.size} svg`, size.iconOnly],
 					[`#legacy-icon-${size.size} svg`, size.iconOnly],
 				] as const) {
-					const svg = await styles(page, selector);
-					assert.equal(svg.width, `${expected}px`);
-					assert.equal(svg.height, `${expected}px`);
+					await expectStyles(page, selector, {
+						width: `${expected}px`,
+						height: `${expected}px`,
+					});
 				}
 			}
-			const link = await styles(page, "#link");
-			assert.equal(link.paddingInlineStart, "14px");
-			assert.equal(link.paddingInlineEnd, "8px");
+			await expectStyles(page, "#link", {
+				paddingInlineStart: "14px",
+				paddingInlineEnd: "8px",
+			});
 		}
 		await page.locator(".cline-ui-theme").evaluate((element) => {
 			element.setAttribute("dir", "ltr");
 		});
-		const override = await styles(page, "#override");
-		assert.equal(override.height, "28px");
-		assert.equal(override.padding, "0px");
-		assert.equal(override.gap, "0px");
-		assert.equal(override.whiteSpace, "normal");
-		assert.equal(
-			(await styles(page, "#override svg:first-child")).width,
-			"20px",
-		);
-		assert.equal(
-			(await styles(page, "#override svg:first-child")).height,
-			"20px",
-		);
-		assert.equal((await styles(page, "#icon-override svg")).width, "18px");
-		assert.equal((await styles(page, "#icon-override svg")).height, "18px");
-		assert.equal((await styles(page, "#icon-override")).width, "24px");
-		assert.equal((await styles(page, "#icon-override")).height, "24px");
-		for (const id of ["legacy-size-override", "legacy-icon-size-override"]) {
-			const svg = await styles(page, `#${id} svg`);
-			assert.equal(svg.width, "24px", `${id} honors the explicit size class`);
-			assert.equal(svg.height, "24px", `${id} honors the explicit size class`);
+		await expectStyles(page, "#override", {
+			height: "28px",
+			padding: "0px",
+			gap: "0px",
+			whiteSpace: "normal",
+		});
+		for (const [selector, width, height] of [
+			["#override svg:first-child", 20, 20],
+			["#icon-override svg", 18, 18],
+			["#icon-override", 24, 24],
+			["#legacy-size-override svg", 24, 24],
+			["#legacy-icon-size-override svg", 24, 24],
+			["#legacy-icon-link", 32, 32],
+			["#legacy-icon-link svg", 16, 16],
+			["#managed-with-preview span svg", 48, 32],
+		] as const) {
+			await expectStyles(page, selector, {
+				width: `${width}px`,
+				height: `${height}px`,
+			});
 		}
-		const legacyLink = await styles(page, "#legacy-icon-link");
-		assert.equal(legacyLink.width, "32px");
-		assert.equal(legacyLink.height, "32px");
-		assert.equal((await styles(page, "#legacy-icon-link svg")).width, "16px");
-		assert.equal((await styles(page, "#legacy-icon-link svg")).height, "16px");
-		const preview = await styles(page, "#managed-with-preview span svg");
-		assert.equal(preview.width, "48px");
-		assert.equal(preview.height, "32px");
 
 		for (const mode of ["light", "dark"]) {
 			await page
@@ -635,13 +595,36 @@ try {
 				for (const tone of ["accent", "neutral"] as const) {
 					const id = `switch-${tone}`;
 					const input = page.locator(`#${id}`);
-					const checkColors = async (
-						state: string,
-						background: string,
-						thumb: string,
-					) => {
+					const [on, onHover, onThumb] =
+						tone === "accent"
+							? ["primary", "primary-emphasis", "primary-foreground"]
+							: ["neutral-solid", "neutral-solid-hover", "neutral-contrast"];
+					const disabledThumb = "cline-ui-switch-disabled-thumb-background";
+					for (const [checked, hover, disabled, background, thumb] of [
+						[false, false, false, "cline-ui-switch-off-background", "white"],
+						[
+							false,
+							true,
+							false,
+							"cline-ui-switch-off-hover-background",
+							"white",
+						],
+						[true, false, false, on, onThumb],
+						[true, true, false, onHover, onThumb],
+						[false, false, true, "surface-hover-darker", disabledThumb],
+						[true, false, true, "surface-hover-darker", disabledThumb],
+					] as const) {
+						await input.evaluate((element) => {
+							(element as HTMLInputElement).disabled = false;
+						});
+						await input.setChecked(checked);
+						await input.evaluate((element, disabled) => {
+							(element as HTMLInputElement).disabled = disabled;
+						}, disabled);
+						if (hover) await input.hover();
+						else await page.mouse.move(0, 0);
 						const colors = await switchColors(page, id, background, thumb);
-						const context = `${id}/${mode}/${surface}/${state}/preflight=${preflight}`;
+						const context = `${id}/${mode}/${surface}/checked=${checked}/hover=${hover}/disabled=${disabled}/preflight=${preflight}`;
 						assert.deepEqual(
 							colors.track,
 							colors.expectedTrack,
@@ -653,46 +636,10 @@ try {
 							`${context} thumb`,
 						);
 						checkedSwitchStates++;
-					};
-					for (const checked of [true, false]) {
-						await input.setChecked(checked);
-						for (const hover of [false, true]) {
-							if (hover) await input.hover();
-							else await page.mouse.move(0, 0);
-							const background = checked
-								? tone === "accent"
-									? hover
-										? "primary-emphasis"
-										: "primary"
-									: hover
-										? "neutral-solid-hover"
-										: "neutral-solid"
-								: hover
-									? "cline-ui-switch-off-hover-background"
-									: "cline-ui-switch-off-background";
-							const thumb = checked
-								? tone === "accent"
-									? "primary-foreground"
-									: "neutral-contrast"
-								: "white";
-							await checkColors(
-								`${checked ? "checked" : "unchecked"}/${hover ? "hover" : "rest"}`,
-								background,
-								thumb,
-							);
-						}
-						await input.evaluate((element) => {
-							(element as HTMLInputElement).disabled = true;
-						});
-						await checkColors(
-							`${checked ? "checked" : "unchecked"}/disabled`,
-							"surface-hover-darker",
-							"cline-ui-switch-disabled-thumb-background",
-						);
-						await input.evaluate((element) => {
-							(element as HTMLInputElement).disabled = false;
-						});
 					}
+					await input.evaluate((element) => {
+						(element as HTMLInputElement).disabled = false;
+					});
 					await page.mouse.move(0, 0);
 					await page.keyboard.press("Tab");
 					await input.focus();

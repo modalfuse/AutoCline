@@ -5,6 +5,7 @@ import { Plus, X } from "lucide-react";
 import {
 	act,
 	type CSSProperties,
+	createRef,
 	type ReactElement,
 	type ReactNode,
 	type SVGProps,
@@ -96,15 +97,13 @@ describe("Button", () => {
 
 	it("forwards native props, refs, and decisions", async () => {
 		const onClick = vi.fn();
-		let forwardedRef: HTMLButtonElement | null = null;
+		const forwardedRef = createRef<HTMLButtonElement>();
 		await render(
 			<Button
 				className="consumer-class"
 				leadingIcon={Plus}
 				onClick={onClick}
-				ref={(node) => {
-					forwardedRef = node;
-				}}
+				ref={forwardedRef}
 				size="lg"
 				tone="destructive"
 				variant="secondary"
@@ -113,7 +112,7 @@ describe("Button", () => {
 			</Button>,
 		);
 		const element = container.querySelector<HTMLButtonElement>("button");
-		expect(forwardedRef).toBe(element);
+		expect(forwardedRef.current).toBe(element);
 		expect(element?.className).toContain("consumer-class");
 		expect(element?.className).toContain("cline-ui-button-destructive");
 		await act(async () => element?.click());
@@ -147,53 +146,20 @@ describe("Button", () => {
 			link?.querySelectorAll(":scope > .cline-ui-button__icon"),
 		).toHaveLength(2);
 	});
-
-	it("prevents activation when a composed link is disabled", async () => {
-		const onClick = vi.fn();
-		const onClickCapture = vi.fn();
-		await render(
-			<Button
-				aria-disabled={false}
-				asChild
-				data-disabled="consumer-value"
-				disabled
-				onClick={onClick}
-				tabIndex={0}
-			>
-				<a href="/settings" onClick={onClick} onClickCapture={onClickCapture}>
-					Settings
-				</a>
-			</Button>,
-		);
-		const link = container.querySelector<HTMLAnchorElement>("a");
-		expect(link?.getAttribute("aria-disabled")).toBe("true");
-		expect(link?.getAttribute("data-disabled")).toBe("");
-		expect(link?.getAttribute("disabled")).toBeNull();
-		expect(link?.tabIndex).toBe(-1);
-		await act(async () => link?.click());
-		expect(onClick).not.toHaveBeenCalled();
-		expect(onClickCapture).not.toHaveBeenCalled();
-	});
 });
 
 describe("IconButton", () => {
 	it("preserves legacy child content, refs, and actions", async () => {
 		const onClick = vi.fn();
-		let forwardedRef: HTMLButtonElement | null = null;
+		const forwardedRef = createRef<HTMLButtonElement>();
 		await render(
-			<IconButton
-				aria-label="Add item"
-				onClick={onClick}
-				ref={(node) => {
-					forwardedRef = node;
-				}}
-			>
+			<IconButton aria-label="Add item" onClick={onClick} ref={forwardedRef}>
 				<Plus className="size-5" data-testid="legacy-icon" />
 			</IconButton>,
 		);
 		const button = container.querySelector("button");
 		const icon = button?.querySelector("[data-testid=legacy-icon]");
-		expect(forwardedRef).toBe(button);
+		expect(forwardedRef.current).toBe(button);
 		expect(button?.type).toBe("button");
 		expect(button?.classList.contains("cline-ui-button-legacy-icons")).toBe(
 			true,
@@ -206,22 +172,16 @@ describe("IconButton", () => {
 
 	it("preserves a legacy composed link's content and ref", async () => {
 		const onClick = vi.fn((event) => event.preventDefault());
-		let childRef: HTMLAnchorElement | null = null;
+		const childRef = createRef<HTMLAnchorElement>();
 		await render(
 			<IconButton asChild aria-label="Close">
-				<a
-					href="/close"
-					onClick={onClick}
-					ref={(node) => {
-						childRef = node;
-					}}
-				>
+				<a href="/close" onClick={onClick} ref={childRef}>
 					<X data-testid="legacy-icon" />
 				</a>
 			</IconButton>,
 		);
 		const link = container.querySelector("a");
-		expect(childRef).toBe(link);
+		expect(childRef.current).toBe(link);
 		expect(link?.getAttribute("aria-label")).toBe("Close");
 		expect(link?.querySelector("[data-testid=legacy-icon]")).not.toBeNull();
 		expect(container.querySelector("button")).toBeNull();
@@ -257,35 +217,6 @@ describe("IconButton", () => {
 		);
 		await act(async () => container.querySelector("button")?.click());
 		expect(onClick).not.toHaveBeenCalled();
-	});
-
-	it("prevents activation when a composed link is disabled", async () => {
-		const onClick = vi.fn();
-		const onClickCapture = vi.fn();
-		await render(
-			<IconButton
-				aria-disabled={false}
-				aria-label="Remove item"
-				icon={X}
-				asChild
-				data-disabled="consumer-value"
-				disabled
-				onClick={onClick}
-				tabIndex={0}
-			>
-				<a href="/remove" onClick={onClick} onClickCapture={onClickCapture}>
-					−
-				</a>
-			</IconButton>,
-		);
-		const link = container.querySelector<HTMLAnchorElement>("a");
-		expect(link?.getAttribute("aria-disabled")).toBe("true");
-		expect(link?.getAttribute("data-disabled")).toBe("");
-		expect(link?.getAttribute("disabled")).toBeNull();
-		expect(link?.tabIndex).toBe(-1);
-		await act(async () => link?.click());
-		expect(onClick).not.toHaveBeenCalled();
-		expect(onClickCapture).not.toHaveBeenCalled();
 	});
 });
 
@@ -332,29 +263,18 @@ describe("managed button icons", () => {
 	});
 
 	it("preserves both child and wrapper refs when adding icons to a composed button", async () => {
-		let childRef: HTMLButtonElement | null = null;
-		let wrapperRef: HTMLButtonElement | null = null;
+		const childRef = createRef<HTMLButtonElement>();
+		const wrapperRef = createRef<HTMLButtonElement>();
 		await render(
-			<Button
-				asChild
-				leadingIcon={Plus}
-				ref={(node) => {
-					wrapperRef = node;
-				}}
-			>
-				<button
-					type="submit"
-					ref={(node) => {
-						childRef = node;
-					}}
-				>
+			<Button asChild leadingIcon={Plus} ref={wrapperRef}>
+				<button type="submit" ref={childRef}>
 					Save
 				</button>
 			</Button>,
 		);
 		const button = container.querySelector("button");
-		expect(childRef).toBe(button);
-		expect(wrapperRef).toBe(button);
+		expect(childRef.current).toBe(button);
+		expect(wrapperRef.current).toBe(button);
 		expect(button?.type).toBe("submit");
 		expect(
 			button?.querySelector(":scope > [data-icon=leading]"),
@@ -363,21 +283,15 @@ describe("managed button icons", () => {
 
 	it("renders a named icon-only link through asChild while preserving its ref and handler", async () => {
 		const onClick = vi.fn((event) => event.preventDefault());
-		let childRef: HTMLAnchorElement | null = null;
+		const childRef = createRef<HTMLAnchorElement>();
 		await render(
 			<IconButton asChild aria-label="Close" icon={X}>
 				{/* biome-ignore lint/a11y/useAnchorContent: IconButton supplies the accessible name and icon. */}
-				<a
-					href="/close"
-					onClick={onClick}
-					ref={(node) => {
-						childRef = node;
-					}}
-				/>
+				<a href="/close" onClick={onClick} ref={childRef} />
 			</IconButton>,
 		);
 		const link = container.querySelector("a");
-		expect(childRef).toBe(link);
+		expect(childRef.current).toBe(link);
 		expect(link?.getAttribute("aria-label")).toBe("Close");
 		expect(link?.querySelectorAll(":scope > [data-icon=icon]")).toHaveLength(1);
 		expect(link?.textContent).toBe("");
@@ -450,6 +364,9 @@ describe("shared button composition", () => {
 			await render(
 				<Component
 					aria-label="Settings"
+					aria-disabled={false}
+					data-disabled="consumer-value"
+					tabIndex={0}
 					asChild
 					disabled
 					onClick={wrapperAction}
@@ -541,49 +458,39 @@ describe("shared button composition", () => {
 			expect(onClick).not.toHaveBeenCalled();
 		});
 
-		for (const scenario of [
-			{
-				description: "preserves implicit native form submission",
-				wrapperType: undefined,
-				childType: undefined,
-				expectedType: "submit",
-			},
-			{
-				description: "forwards an explicit non-submitting type",
-				wrapperType: "button",
-				childType: undefined,
-				expectedType: "button",
-			},
-			{
-				description: "forwards an explicit submitting type",
-				wrapperType: "submit",
-				childType: undefined,
-				expectedType: "submit",
-			},
-			{
-				description: "preserves the child's explicit type",
-				wrapperType: "button",
-				childType: "submit",
-				expectedType: "submit",
-			},
+		for (const [description, wrapperType, childType, expectedType] of [
+			[
+				"preserves implicit native form submission",
+				undefined,
+				undefined,
+				"submit",
+			],
+			[
+				"forwards an explicit non-submitting type",
+				"button",
+				undefined,
+				"button",
+			],
+			["forwards an explicit submitting type", "submit", undefined, "submit"],
+			["preserves the child's explicit type", "button", "submit", "submit"],
 		] as const) {
-			it(`${name} ${scenario.description} when composed`, async () => {
+			it(`${name} ${description} when composed`, async () => {
 				const onSubmit = vi.fn((event) => event.preventDefault());
 				await render(
 					<form onSubmit={onSubmit}>
-						<Component aria-label="Save" asChild type={scenario.wrapperType}>
-							<button type={scenario.childType}>Save</button>
+						<Component aria-label="Save" asChild type={wrapperType}>
+							<button type={childType}>Save</button>
 						</Component>
 					</form>,
 				);
 				const button = container.querySelector("button");
-				expect(button?.type).toBe(scenario.expectedType);
+				expect(button?.type).toBe(expectedType);
 				expect(button?.getAttribute("type")).toBe(
-					scenario.childType ?? scenario.wrapperType ?? null,
+					childType ?? wrapperType ?? null,
 				);
 				await act(async () => button?.click());
 				expect(onSubmit).toHaveBeenCalledTimes(
-					scenario.expectedType === "submit" ? 1 : 0,
+					expectedType === "submit" ? 1 : 0,
 				);
 			});
 		}
@@ -671,46 +578,28 @@ describe("shared button press feedback", () => {
 		["Button", ButtonWithIcon],
 		["IconButton", IconButtonWithIcon],
 	] as const) {
-		it(`${name} uses the stylesheet default without an inline scale`, async () => {
-			await render(
-				<Component aria-label="Continue" style={{ color: "red" }}>
-					Continue
-				</Component>,
-			);
-			const button = container.querySelector("button");
-			expect(button?.classList.contains("cline-ui-button")).toBe(true);
-			expect(button?.hasAttribute("data-press-scale")).toBe(false);
-			expect(
-				button?.style.getPropertyValue("--cline-ui-button-press-scale"),
-			).toBe("");
-			expect(button?.style.color).toBe("red");
-		});
-
-		it(`${name} opts out without forwarding pressScale to the DOM`, async () => {
-			await render(
-				<Component aria-label="Continue" pressScale={false}>
-					Continue
-				</Component>,
-			);
-			const button = container.querySelector("button");
-			expect(button?.getAttribute("data-press-scale")).toBe("false");
-			expect(button?.hasAttribute("pressscale")).toBe(false);
-		});
-
-		it(`${name} supports a custom scale and preserves unrelated styles`, async () => {
+		it.each([
+			undefined,
+			false,
+			0.94,
+		] as const)(`${name} forwards pressScale=%s and preserves unrelated styles`, async (pressScale) => {
 			await render(
 				<Component
 					aria-label="Continue"
-					pressScale={0.94}
+					pressScale={pressScale}
 					style={{ color: "red" }}
 				>
 					Continue
 				</Component>,
 			);
 			const button = container.querySelector("button");
+			expect(button?.classList.contains("cline-ui-button")).toBe(true);
+			expect(button?.getAttribute("data-press-scale")).toBe(
+				pressScale === false ? "false" : null,
+			);
 			expect(
 				button?.style.getPropertyValue("--cline-ui-button-press-scale"),
-			).toBe("0.94");
+			).toBe(typeof pressScale === "number" ? String(pressScale) : "");
 			expect(button?.style.color).toBe("red");
 			expect(button?.hasAttribute("pressscale")).toBe(false);
 		});

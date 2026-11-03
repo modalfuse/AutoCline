@@ -37,21 +37,19 @@ describe("Badge", () => {
 	});
 
 	it("forwards native props, refs, and custom classes", async () => {
-		let forwardedRef: HTMLSpanElement | null = null;
+		const forwardedRef = createRef<HTMLSpanElement>();
 		await render(
 			<Badge
 				aria-label="Status"
 				className="consumer-class"
-				ref={(node) => {
-					forwardedRef = node;
-				}}
+				ref={forwardedRef}
 				title="Current status"
 			>
 				Active
 			</Badge>,
 		);
 		const badge = container.querySelector<HTMLSpanElement>("span");
-		expect(forwardedRef).toBe(badge);
+		expect(forwardedRef.current).toBe(badge);
 		expect(badge?.className).toContain("consumer-class");
 		expect(badge?.getAttribute("aria-label")).toBe("Status");
 		expect(badge?.title).toBe("Current status");
@@ -114,38 +112,26 @@ describe("Badge", () => {
 		expect(onAction).toHaveBeenCalledWith(badge);
 	});
 
-	it("does not submit its surrounding form by default", async () => {
+	it.each([
+		undefined,
+		"submit",
+	] as const)("uses native form behavior for type=%s", async (type) => {
 		const onClick = vi.fn();
 		const onSubmit = vi.fn((event: FormEvent<HTMLFormElement>) =>
 			event.preventDefault(),
 		);
 		await render(
 			<form onSubmit={onSubmit}>
-				<Badge interactive onClick={onClick}>
-					Apply filter
+				<Badge interactive type={type} onClick={type ? undefined : onClick}>
+					Apply
 				</Badge>
 			</form>,
 		);
 		const badge = container.querySelector("button");
-		expect(badge?.type).toBe("button");
+		expect(badge?.type).toBe(type ?? "button");
 		await act(async () => badge?.click());
-		expect(onClick).toHaveBeenCalledOnce();
-		expect(onSubmit).not.toHaveBeenCalled();
-	});
-
-	it("supports explicit form submission without a click handler", async () => {
-		const onSubmit = vi.fn((event: FormEvent<HTMLFormElement>) =>
-			event.preventDefault(),
-		);
-		await render(
-			<form onSubmit={onSubmit}>
-				<Badge interactive type="submit">
-					Save
-				</Badge>
-			</form>,
-		);
-		await act(async () => container.querySelector("button")?.click());
-		expect(onSubmit).toHaveBeenCalledOnce();
+		expect(onClick).toHaveBeenCalledTimes(type ? 0 : 1);
+		expect(onSubmit).toHaveBeenCalledTimes(type ? 1 : 0);
 	});
 
 	it("prevents activation while disabled", async () => {
