@@ -649,12 +649,9 @@ async function fetchLiteLlmPrivateModels(
 							continue;
 						}
 						const info = model.model_info;
-						const label = formatLiteLlmVendorModelLabel(
-							upstreamModelId,
-							modelId,
-						);
+						// Display the LiteLLM route/alias alone — never name+(upstream).
 						models[modelId] = buildModelFromPrivateSource(modelId, {
-							name: label,
+							name: modelId,
 							maxTokens: info?.max_output_tokens ?? info?.max_tokens,
 							maxInputTokens: info?.max_input_tokens ?? info?.max_tokens,
 							supportsImages: info?.supports_vision,

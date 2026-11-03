@@ -196,3 +196,20 @@ describe("buildModelPickerData", () => {
 		]);
 	});
 });
+
+it("shows LiteLLM model_name alone without upstream parentheses", () => {
+	const data = buildModelPickerData("litellm", [
+		{ id: "deepseek-chat", name: "DeepSeek-deepseek-chat" },
+		{ id: "auto-coding", name: "auto-coding" },
+		{
+			id: "79@H3C-4xRTX308012GB/Qwen2.5-14B-AWQ",
+			name: "79@H3C-4xRTX308012GB (openai/Qwen2.5-14B-Instruct-AWQ)",
+		},
+	]);
+	expect(data.options.map((o) => o.label)).toEqual([
+		"79@H3C-4xRTX308012GB/Qwen2.5-14B-AWQ",
+		"deepseek-chat",
+	]);
+	expect(data.options.every((o) => !o.label.includes("("))).toBe(true);
+});
+

@@ -776,7 +776,7 @@ describe("resolveProviderConfig", () => {
 		expect(resolved?.knownModels?.["openai/gpt-4o-mini"]).toBeUndefined();
 		expect(resolved?.knownModels?.["private-proxy-model"]).toEqual(
 			expect.objectContaining({
-				name: "OpenAI-gpt-4o-mini",
+				name: "private-proxy-model",
 				maxTokens: 64_000,
 				maxInputTokens: 500_000,
 				capabilities: expect.arrayContaining(["images", "reasoning"]),
