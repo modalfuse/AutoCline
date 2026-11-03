@@ -10,6 +10,7 @@ import {
 } from "@cline/core/cloud"
 import { createMediaBudgetState, validateAndReserveImageMedia } from "@cline/shared"
 import type { CloudHandoffView } from "@shared/cloud/cloud-handoff"
+import { Logger } from "@/shared/services/Logger"
 import { getProviderSettingsManager } from "./provider-migration"
 
 function handoffError(
@@ -39,7 +40,10 @@ export interface PrepareCloudHandoffInput {
 	files: string[]
 }
 
-type HandoffCloud = Pick<CloudSessionController, "prepareHandoffRepository" | "listModels" | "create" | "send" | "subscribe">
+type HandoffCloud = Pick<
+	CloudSessionController,
+	"prepareHandoffRepository" | "listModels" | "create" | "send" | "subscribe" | "detach"
+>
 
 interface PreparedHandoff {
 	cloud: HandoffCloud
@@ -273,6 +277,8 @@ export class SdkCloudHandoffCoordinator {
 			)
 		} finally {
 			unsubscribe()
+			const completed = this.attempts.get(attempt.sourceTaskId)
+			if (completed?.id === attempt.id) await this.detachCompleted(cloud, completed)
 			await this.options.changed()
 		}
 	}
@@ -309,8 +315,18 @@ export class SdkCloudHandoffCoordinator {
 		} finally {
 			if (this.attempts.get(attempt.sourceTaskId) === launching) {
 				this.attempts.set(attempt.sourceTaskId, settled)
+				await this.detachCompleted(cloud, settled)
 				await this.options.changed()
 			}
+		}
+	}
+
+	private async detachCompleted(cloud: HandoffCloud, attempt: Attempt): Promise<void> {
+		if (attempt.phase !== "complete" || attempt.delivery === "unsent") return
+		try {
+			await cloud.detach(attempt.sessionId)
+		} catch (error) {
+			Logger.error("[SdkCloudHandoffCoordinator] Failed to detach completed handoff", error)
 		}
 	}
 

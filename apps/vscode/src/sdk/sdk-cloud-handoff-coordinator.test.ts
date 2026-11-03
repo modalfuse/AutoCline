@@ -59,6 +59,7 @@ function setup() {
 			{ id: "test-model", name: "Test model", catalogId: "cline" },
 		]),
 		create: vi.fn<CloudSessionController["create"]>(),
+		detach: vi.fn<CloudSessionController["detach"]>(async () => {}),
 		send: vi.fn<CloudSessionController["send"]>(async () => ({ sessionId: "ses_example", ok: true })),
 		subscribe: vi.fn<CloudSessionController["subscribe"]>(() => () => {}),
 	}
@@ -267,6 +268,16 @@ describe("cloud conversation handoff", () => {
 			}),
 		})
 		expect(coordinator.viewFor(input.sourceTaskId)).toMatchObject({ phase: "complete", delivery: "sent" })
+		expect(cloud.detach).toHaveBeenCalledExactlyOnceWith("ses_example")
+	})
+
+	it("preserves successful delivery when viewer cleanup fails", async () => {
+		const { coordinator, cloud, id } = setup()
+		cloud.detach.mockRejectedValueOnce(new Error("Connection already closed"))
+		await coordinator.prepare(input)
+		await coordinator.confirm(id())
+		expect(coordinator.viewFor(input.sourceTaskId)).toMatchObject({ phase: "complete", delivery: "sent" })
+		expect(cloud.detach).toHaveBeenCalledExactlyOnceWith("ses_example")
 	})
 
 	it("cancels a prepared snapshot without publishing", async () => {
@@ -296,7 +307,7 @@ describe("cloud conversation handoff", () => {
 	})
 
 	it.each([false, true])("distinguishes unsent from dispatched=%s initial-message failure", async (dispatched) => {
-		const { coordinator, id } = setup()
+		const { coordinator, cloud, id } = setup()
 		publish.mockResolvedValue({
 			sessionId: "ses_example",
 			status: "idle",
@@ -304,6 +315,7 @@ describe("cloud conversation handoff", () => {
 		})
 		await coordinator.prepare(input)
 		await coordinator.confirm(id())
+		expect(cloud.detach).toHaveBeenCalledTimes(dispatched ? 1 : 0)
 		expect(coordinator.viewFor(input.sourceTaskId)).toMatchObject({
 			phase: "complete",
 			delivery: dispatched ? "unconfirmed" : "unsent",
@@ -334,6 +346,7 @@ describe("cloud conversation handoff", () => {
 		"draining",
 	])("retries only the unsent continuation in the existing task (%s)", async (outcome) => {
 		const { coordinator, cloud, id } = await setupUnsentContinuation()
+		expect(cloud.detach).not.toHaveBeenCalled()
 		if (outcome === "error") cloud.send.mockRejectedValueOnce(new Error("connection closed"))
 		else if (outcome === "draining")
 			cloud.send.mockRejectedValueOnce(
@@ -357,7 +370,9 @@ describe("cloud conversation handoff", () => {
 			phase: "complete",
 			delivery: outcome === "sent" ? "sent" : outcome === "draining" ? "unsent" : "unconfirmed",
 		})
+		expect(cloud.detach).toHaveBeenCalledTimes(outcome === "draining" ? 0 : 1)
 		await coordinator.retryMessage(id())
+		expect(cloud.detach).toHaveBeenCalledExactlyOnceWith("ses_example")
 		expect(cloud.send).toHaveBeenCalledTimes(outcome === "draining" ? 2 : 1)
 		if (outcome === "draining") {
 			expect(cloud.send.mock.calls[1]).toEqual(cloud.send.mock.calls[0])

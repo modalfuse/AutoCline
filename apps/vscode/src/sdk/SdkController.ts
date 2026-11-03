@@ -1749,7 +1749,10 @@ export class Controller {
 				assertCurrent()
 				if (!organizations) throw new Error("Could not verify the cloud organization. Try again.")
 				const activeId = organizations.find((organization) => organization.active)?.organizationId
-				if ((activeId ?? null) !== organizationId) throw new Error("The cloud organization changed. Run /cloud again.")
+				if ((activeId ?? null) !== organizationId)
+					throw new Error(
+						"The cloud organization changed. Reload this VS Code window to refresh your account, then run /cloud again.",
+					)
 				return activeId
 			},
 			clientIdentity: {

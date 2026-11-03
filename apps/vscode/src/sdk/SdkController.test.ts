@@ -1206,7 +1206,10 @@ describe("cloud handoff controller", () => {
 
 	it.each([
 		{ organizations: undefined, message: "Could not verify the cloud organization" },
-		{ organizations: [{ active: true, organizationId: "org-other" }], message: "cloud organization changed" },
+		{
+			organizations: [{ active: true, organizationId: "org-other" }],
+			message: "The cloud organization changed. Reload this VS Code window to refresh your account, then run /cloud again.",
+		},
 	])("does not fall back to Personal when $message", async ({ organizations, message }) => {
 		const { controller, cloud, fetch } = setup()
 		controller.accountService.fetchUserOrganizationsRPC.mockResolvedValueOnce(organizations)
