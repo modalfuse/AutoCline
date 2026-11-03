@@ -2500,26 +2500,18 @@ export async function handleCommand(
 				});
 			},
 		});
-		const workspaceRoot = () => {
-			// Only refines mention chips, so a failed lookup must not fail the read.
-			return binding.sessionManager
-				.get(sessionId)
-				.then((remoteSession) =>
-					remoteSession
-						? remoteSession.workspaceRoot || remoteSession.cwd || undefined
-						: undefined,
-				)
-				.catch(() => undefined);
-		};
 		// Warm/stale cache must return immediately; Hub refresh continues in
 		// the background and republishes via onRefreshed / remote_session_messages_refreshed.
 		void swr.refresh.catch(() => false);
+		// Use the binding's workspaceRoot directly instead of awaiting Hub to
+		// refine mention chips; the cached transcript must not block on a slow
+		// or still-connecting remote session manager.
 		return await readSessionMessages(
 			ctx,
 			sessionId,
 			maxMessages,
 			swr.messages,
-			await workspaceRoot(),
+			binding.workspaceRoot,
 		);
 	}
 	// ── Smoke-only hooks (scripts/smoke-remote-cache-live.ts) ─────────

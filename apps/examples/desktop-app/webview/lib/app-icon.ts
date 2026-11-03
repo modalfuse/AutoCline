@@ -16,7 +16,7 @@ export const APP_ICONS = [
 
 export type AppIconId = (typeof APP_ICONS)[number]["id"];
 
-export const DEFAULT_APP_ICON: AppIconId = "midnight";
+export const DEFAULT_APP_ICON: AppIconId = "classic";
 
 const RETIRED_APP_ICON_MIGRATIONS = {
 	sunrise: "hologram",
