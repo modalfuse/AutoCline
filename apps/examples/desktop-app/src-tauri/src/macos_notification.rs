@@ -6,7 +6,9 @@ use std::sync::OnceLock;
 use tauri::AppHandle;
 
 const DEV_APP_DIRECTORY: &str = "notification-identity";
-const DEV_BUNDLE_NAME: &str = "Cline.app";
+// AutoCline ships a distinct bundle identity so notifications and Launch
+// Services entries never collide with an installed Cline.app.
+const DEV_BUNDLE_NAME: &str = "AutoCline.app";
 const LAUNCH_SERVICES_REGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
 static CONFIGURATION: OnceLock<Result<(), String>> = OnceLock::new();
@@ -201,12 +203,12 @@ mod tests {
         fs::write(&icon, b"test icon").unwrap();
 
         let bundle =
-            create_dev_application_bundle(&executable, &icon, "bot.cline.app.dev", "Cline Dev")
+            create_dev_application_bundle(&executable, &icon, "bot.autocline.app.dev", "AutoCline Dev")
                 .unwrap();
         let plist = fs::read_to_string(bundle.join("Contents/Info.plist")).unwrap();
 
-        assert!(plist.contains("<string>bot.cline.app.dev</string>"));
-        assert!(plist.contains("<string>Cline Dev</string>"));
+        assert!(plist.contains("<string>bot.autocline.app.dev</string>"));
+        assert!(plist.contains("<string>AutoCline Dev</string>"));
         assert_eq!(
             fs::read_link(bundle.join("Contents/MacOS/cline-app")).unwrap(),
             executable

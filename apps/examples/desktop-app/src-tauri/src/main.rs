@@ -1761,8 +1761,13 @@ mod tests {
     fn backend_bundle_uses_only_the_running_apps_resource_directory() {
         let relative = Path::new("bin").join("desktop-backend").join("index.js");
         for resource_dir in [
+            // AutoCline is the default install target; the Cline* entries stay
+            // listed because the fork is designed to run beside Cline.app.
+            Path::new("/Applications/AutoCline.app/Contents/Resources"),
             Path::new("/Applications/Cline.app/Contents/Resources"),
+            Path::new("C:/Program Files/AutoCline"),
             Path::new("C:/Program Files/Cline"),
+            Path::new("/usr/lib/AutoCline"),
             Path::new("/usr/lib/Cline"),
             Path::new("/usr/lib/Cline Beta"),
             Path::new("/usr/lib/Cline Nightly"),
