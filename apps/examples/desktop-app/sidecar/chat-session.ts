@@ -79,6 +79,7 @@ import {
 } from "./session-config";
 import { derivePromptFromMessages } from "./session-data/common";
 import { persistSessionMessages } from "./session-data/messages";
+import { writeRemoteCache } from "./session-data/remote-cache";
 import { readRemoteSessionSwa } from "./session-data/remote-session-swa";
 import type {
 	ChatSessionCommandRequest,
@@ -1940,7 +1941,16 @@ async function handleSendOnce(
 		});
 		if (session && ownsBusyState) {
 			session.status = "idle";
-			if (result?.messages) session.messages = result.messages;
+			if (result?.messages) {
+				session.messages = result.messages;
+				// Persist to remote-cache immediately so reopens / Hub 1006 / reconnects
+				// can show the new turn from disk, not just what Hub last acknowledged.
+				if (binding.kind === "ssh") {
+					writeRemoteCache(binding.environmentId, sessionId, result.messages, {
+						source: "desktop:send",
+					});
+				}
+			}
 		}
 		return {
 			sessionId,
