@@ -161,7 +161,7 @@ describe("buildModelPickerData", () => {
 	it.each([
 		"cline",
 		"other-provider",
-	])("distinguishes colliding names in the %s fallback without hiding model routes", (providerId) => {
+	])("keeps colliding display names short without (id) suffixes in the %s fallback", (providerId) => {
 		const models = [
 			model("cline-pass/deepseek-v4-flash", "DeepSeek V4 Flash"),
 			model("deepseek/deepseek-v4-flash", "DeepSeek V4 Flash"),
@@ -171,19 +171,14 @@ describe("buildModelPickerData", () => {
 		];
 		const { options } = buildModelPickerData(providerId, models);
 		expect(options).toHaveLength(models.length);
-		expect(new Set(options.map((option) => option.label)).size).toBe(
+		expect(new Set(options.map((option) => option.value)).size).toBe(
 			models.length,
 		);
-		for (const entry of models.slice(0, 4)) {
-			expect(options).toContainEqual({
-				label: `${entry.name} (${entry.id})`,
-				value: entry.id,
-			});
+		for (const entry of models) {
+			const match = options.find((option) => option.value === entry.id);
+			expect(match?.label).toBe(entry.name);
 		}
-		expect(options).toContainEqual({
-			label: "Kimi K3",
-			value: "cline-pass/kimi-k3",
-		});
+		expect(options.every((option) => !option.label.includes("("))).toBe(true);
 	});
 
 	it("renders other providers as a flat list with display names", () => {
