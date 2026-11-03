@@ -24,42 +24,17 @@ function byLabel(a: SearchComboboxOption, b: SearchComboboxOption): number {
 	return a.label.localeCompare(b.label);
 }
 
-function shortModelLabel(model: ProviderModel): string {
-	// Prefer the route/alias id. Drop any legacy "name (upstream)" form.
-	const raw = (model.name?.trim() || model.id).trim();
-	const cut = raw.indexOf(" (");
-	if (cut > 0 && raw.endsWith(")")) {
-		return raw.slice(0, cut);
-	}
-	return raw;
-}
-
 function flatOptions(
 	models: ProviderModel[],
 	options?: { shortIdsOnly?: boolean },
 ): SearchComboboxOption[] {
-	if (options?.shortIdsOnly) {
-		return models
-			.map((model) => ({
-				label: model.id,
-				value: model.id,
-			}))
-			.sort(byLabel);
-	}
-	const labelCounts = new Map<string, number>();
-	for (const model of models) {
-		const label = shortModelLabel(model);
-		labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
-	}
+	// Never append " (id)" on collisions — AutoCline shows the short display
+	// name alone (LiteLLM model_name / model.name), not name+(upstream).
 	return models
-		.map((model) => {
-			const label = shortModelLabel(model);
-			return {
-				label:
-					(labelCounts.get(label) ?? 0) > 1 ? `${label} (${model.id})` : label,
-				value: model.id,
-			};
-		})
+		.map((model) => ({
+			label: options?.shortIdsOnly ? model.id : displayName(model),
+			value: model.id,
+		}))
 		.sort(byLabel);
 }
 

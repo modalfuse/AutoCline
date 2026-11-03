@@ -213,3 +213,12 @@ it("shows LiteLLM model_name alone without upstream parentheses", () => {
 	expect(data.options.every((o) => !o.label.includes("("))).toBe(true);
 });
 
+it("never appends (id) when display names collide", () => {
+	const data = buildModelPickerData("openrouter", [
+		{ id: "a/model-1", name: "Same" },
+		{ id: "b/model-2", name: "Same" },
+	]);
+	expect(data.options.map((o) => o.label)).toEqual(["Same", "Same"]);
+	expect(data.options.every((o) => !o.label.includes("("))).toBe(true);
+});
+
