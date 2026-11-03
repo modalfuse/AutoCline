@@ -78,6 +78,7 @@ describe("RemoteEnvironmentService", () => {
 	): RemoteEnvironmentService {
 		let id = 0;
 		return new RemoteEnvironmentService({
+			env: {},
 			...options,
 			profilesPath,
 			dependencies: {
@@ -238,6 +239,17 @@ describe("RemoteEnvironmentService", () => {
 				}
 				if (helperMissing && command.includes("'test' '-x'"))
 					return { stdout: "", stderr: "", exitCode: 1 };
+				if (
+					helperMissing &&
+					command.includes("ls -1t") &&
+					command.includes(".cline/remote")
+				) {
+					// Reusing an on-host helper clears the missing state (replaces upload).
+					helperMissing = false;
+					return success(
+						"/home/dev/.cline/remote/cline-linux-x64-aaaaaaaaaaaaaaaa\n",
+					);
+				}
 				if (helperMissing && command.includes("'hub' 'stop'"))
 					throw new Error("Helper missing");
 				if (requiredIdentity && !args.includes(requiredIdentity)) {
@@ -299,7 +311,7 @@ describe("RemoteEnvironmentService", () => {
 		// This profile's owned Hub is stopped over SSH with the rotated identity.
 		// (The other profile's record belongs to its own reconnect and is left
 		// for it to consume.)
-		expect(uploads).toBe(1);
+		expect(uploads).toBe(0);
 		await restarted.dispose().catch(() => undefined);
 		// The record this profile was owed a stop for is consumed; the other
 		// profile keeps its own record for its next reconnect.
@@ -485,7 +497,16 @@ describe("RemoteEnvironmentService", () => {
 					return inspection("Linux", "aarch64", "/home/dev");
 				}
 				if (command.includes("'test' '-x'")) {
+					// Exact content-addressed path is missing; reuse another helper.
 					return { stdout: "", stderr: "", exitCode: 1 };
+				}
+				if (
+					command.includes("ls -1t") &&
+					command.includes(".cline/remote")
+				) {
+					return success(
+						"/home/dev/.cline/remote/cline-linux-arm64-deadbeefdeadbeef\n",
+					);
 				}
 				if (command.includes("'hub' 'ensure'")) {
 					return success(
@@ -541,15 +562,29 @@ describe("RemoteEnvironmentService", () => {
 			"remote-secret",
 		);
 
-		const upload = invocations.find(
-			(invocation) => invocation.options.inputFile,
+		// AutoCline must never SSH-cat the helper; reuse an on-host binary instead.
+		expect(
+			invocations.some((invocation) => invocation.options.inputFile),
+		).toBe(false);
+		expect(
+			invocations.some((invocation) =>
+				(invocation.args.at(-1) ?? "").includes("umask 077; cat >"),
+			),
+		).toBe(false);
+		const link = invocations.find((invocation) =>
+			(invocation.args.at(-1) ?? "").includes("'ln' '-sfn'"),
 		);
-		expect(upload).toMatchObject({
-			executable: "ssh",
-			options: { inputFile: "/opt/cline/code-sidecar-linux-arm64" },
-		});
-		expect(upload?.args.at(-1)).toContain("umask 077; cat >");
-		expect(upload?.args).toContain("ClearAllForwardings=yes");
+		expect(link?.args.at(-1)).toContain(
+			"cline-linux-arm64-deadbeefdeadbeef",
+		);
+		expect(link?.args.at(-1)).toContain(
+			"cline-linux-arm64-abcdef0123456789",
+		);
+		expect(
+			invocations.some((invocation) =>
+				invocation.args.includes("ClearAllForwardings=yes"),
+			),
+		).toBe(true);
 		const ensure = invocations.find((invocation) =>
 			invocation.args.at(-1)?.includes("'hub' 'ensure'"),
 		);
@@ -703,6 +738,89 @@ describe("RemoteEnvironmentService", () => {
 		expect(invocations.some((invocation) => invocation.options.inputFile)).toBe(
 			false,
 		);
+	});
+
+	it("reuses a differently-hashed remote helper without uploading", async () => {
+		const invocations: Invocation[] = [];
+		const service = createService({
+			runProcess: async (executable, args, options) => {
+				invocations.push({ executable, args, options });
+				const command = args.at(-1) ?? "";
+				if (command.includes("uname -s")) {
+					return inspection("Linux", "x86_64", "/home/dev");
+				}
+				if (command.includes("'test' '-x'")) {
+					return { stdout: "", stderr: "", exitCode: 1 };
+				}
+				if (command.includes("ls -1t") && command.includes(".cline/remote")) {
+					return success(
+						"/home/dev/.cline/remote/cline-linux-x64-08d9954c9b8b79bd\n",
+					);
+				}
+				if (command.includes("'hub' 'ensure'")) {
+					return success(
+						'{"url":"ws://127.0.0.1:25463/hub","authToken":"token"}\n',
+					);
+				}
+				return success();
+			},
+			resolveHelperBinary: async () => "/opt/cline/helper",
+			fileReadable: async () => true,
+			hashFile: async () => "0149bbee2827d5f4ffffffffffffffff",
+			verifyHubConnection: async () => true,
+		});
+		const profile = await service.upsert({
+			name: "hp02",
+			host: "hp02",
+			hubUrls: PROFILE_HUB_URLS,
+		});
+		await service.connect(profile.id);
+		expect(invocations.some((invocation) => invocation.options.inputFile)).toBe(
+			false,
+		);
+		const ensure = invocations.find((invocation) =>
+			invocation.args.at(-1)?.includes("'hub' 'ensure'"),
+		);
+		expect(ensure?.args.at(-1)).toContain(
+			"/home/dev/.cline/remote/cline-linux-x64-0149bbee2827d5f4",
+		);
+	});
+
+	it("errors without uploading when no remote helper exists", async () => {
+		const invocations: Invocation[] = [];
+		const service = createService({
+			runProcess: async (executable, args, options) => {
+				invocations.push({ executable, args, options });
+				const command = args.at(-1) ?? "";
+				if (command.includes("uname -s")) {
+					return inspection("Linux", "x86_64", "/home/dev");
+				}
+				if (command.includes("'test' '-d'")) {
+					return success();
+				}
+				// Missing exact helper, empty remote dir, and no override path.
+				return { stdout: "", stderr: "", exitCode: 1 };
+			},
+			resolveHelperBinary: async () => "/opt/cline/helper",
+			fileReadable: async () => true,
+			hashFile: async () => "0123456789abcdef",
+		});
+		const profile = await service.upsert({
+			name: "Empty",
+			host: "empty",
+			hubUrls: PROFILE_HUB_URLS,
+		});
+		await expect(service.connect(profile.id)).rejects.toThrow(
+			/never uploads the helper over SSH/,
+		);
+		expect(invocations.some((invocation) => invocation.options.inputFile)).toBe(
+			false,
+		);
+		expect(
+			invocations.some((invocation) =>
+				(invocation.args.at(-1) ?? "").includes("umask 077; cat >"),
+			),
+		).toBe(false);
 	});
 
 	it("allows renaming but keeps a profile's SSH destination immutable", async () => {

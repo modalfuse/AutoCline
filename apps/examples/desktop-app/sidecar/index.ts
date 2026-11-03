@@ -3,6 +3,7 @@ import {
 	checkManagedHubBuildMismatch,
 	createClineTelemetryServiceConfig,
 	ensureLoginShellPath,
+	ProviderSettingsManager,
 	readGlobalSettings,
 	setHomeDirIfUnset,
 	setModelToolEnabledGlobally,
@@ -87,6 +88,26 @@ async function main(desktopCliPath?: string) {
 		}
 	} catch (error) {
 		observability.logger.error?.("Failed to seed web search default", {
+			error,
+		});
+	}
+
+	// AutoCline: seed LiteLLM on hp02 once when the user has not chosen a
+	// provider yet. Never overwrite an explicit last-used selection.
+	try {
+		const manager = new ProviderSettingsManager();
+		const state = manager.read();
+		if (!state.lastUsedProvider) {
+			const existing = manager.getProviderSettings("litellm");
+			manager.saveProviderSettings({
+				provider: "litellm",
+				baseUrl: existing?.baseUrl?.trim() || "http://100.101.163.69:4000/v1",
+				apiKey: existing?.apiKey?.trim() || "sk-autocline-local",
+				model: existing?.model?.trim() || "deepseek-chat",
+			});
+		}
+	} catch (error) {
+		observability.logger.error?.("Failed to seed AutoCline LiteLLM default", {
 			error,
 		});
 	}

@@ -37,11 +37,17 @@ export function hasCompletedOnboarding(): boolean {
 		return true;
 	}
 	try {
-		return (
+		const completed =
 			parseOnboardingStorage(
 				window.localStorage.getItem(ONBOARDING_STORAGE_KEY),
-			).completedAt !== null
-		);
+			).completedAt !== null;
+		if (completed) {
+			return true;
+		}
+		// AutoCline omits the stock "Sign in with Cline" first-run flow by
+		// default. Users can still replay it from Settings → reset onboarding.
+		markOnboardingCompleted();
+		return true;
 	} catch {
 		// Treat unreadable storage (private mode, disabled storage) as
 		// completed so the app never traps the user in the first-run flow.

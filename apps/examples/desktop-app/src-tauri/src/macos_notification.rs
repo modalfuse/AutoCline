@@ -135,7 +135,7 @@ fn dev_info_plist(identifier: &str, app_name: &str) -> String {
   <key>CFBundleDisplayName</key>
   <string>{app_name}</string>
   <key>CFBundleExecutable</key>
-  <string>cline-app</string>
+  <string>AutoCline</string>
   <key>CFBundleIconFile</key>
   <string>icon.icns</string>
   <key>CFBundleIdentifier</key>

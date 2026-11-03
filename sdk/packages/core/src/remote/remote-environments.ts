@@ -257,6 +257,8 @@ export class RemoteEnvironmentService {
 	private readonly commandTimeoutMs: number;
 	private readonly uploadTimeoutMs: number;
 	private readonly hubShutdownTimeoutMs: number;
+	/** Optional absolute helper path on the *remote* host (never uploaded). */
+	private readonly remoteHelperOverridePath?: string;
 	private readonly dependencies: RemoteEnvironmentDependencies;
 	private readonly onStatusChange?: (status: RemoteEnvironmentStatus) => void;
 	/**
@@ -296,6 +298,10 @@ export class RemoteEnvironmentService {
 		this.uploadTimeoutMs = options.uploadTimeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS;
 		this.hubShutdownTimeoutMs =
 			options.hubShutdownTimeoutMs ?? DEFAULT_HUB_SHUTDOWN_TIMEOUT_MS;
+		// Same env can name a local hash source *or* a pre-installed remote path;
+		// ensureHelper only uses it after checking the remote with `test -x`.
+		this.remoteHelperOverridePath =
+			options.helperBinaryPath ?? env.CLINE_REMOTE_HELPER_BINARY;
 		this.onStatusChange = options.onStatusChange;
 		this.onConnectionLost = options.onConnectionLost;
 		this.dependencies = { ...defaults, ...options.dependencies };
@@ -625,51 +631,108 @@ export class RemoteEnvironmentService {
 		});
 	}
 
+	/**
+	 * Resolve a helper already present on the remote host. AutoCline never
+	 * uploads the ~180MB CLI binary over SSH: place it once under
+	 * `~/.cline/remote/` (shared with stock Cline) or point
+	 * `CLINE_REMOTE_HELPER_BINARY` at an executable path on the remote.
+	 */
 	private async ensureHelper(
 		profile: RemoteEnvironmentProfile,
 		inspection: RemoteInspection,
 	): Promise<string> {
-		const localHelper = await this.dependencies.resolveHelperBinary(inspection);
-		if (!localHelper || !(await this.dependencies.fileReadable(localHelper))) {
-			throw new Error(
-				`Remote target ${inspection.platform}/${inspection.arch} is unsupported in SSH: ` +
-					"no compatible Cline CLI binary is available. Build the Cline CLI for that target and set " +
-					"CLINE_REMOTE_HELPER_BINARY; network installers are intentionally not used.",
-			);
-		}
-
-		const hash = await this.dependencies.hashFile(localHelper);
 		const remoteDirectory = joinRemote(
 			inspection.home,
 			REMOTE_HELPER_DIRECTORY,
 		);
-		const remoteHelper = joinRemote(
-			remoteDirectory,
-			`cline-${inspection.platform}-${inspection.arch}-${hash.slice(0, 16)}`,
-		);
-		await this.installHelper(
-			profile,
-			localHelper,
-			remoteDirectory,
-			remoteHelper,
-		);
-		return remoteHelper;
-	}
+		const prefix = `cline-${inspection.platform}-${inspection.arch}-`;
+		let expectedHelper: string | undefined;
 
-	private async installHelper(
-		profile: RemoteEnvironmentProfile,
-		localHelper: string,
-		remoteDirectory: string,
-		remoteHelper: string,
-	): Promise<void> {
-		const existing = await this.execRemoteAllowFailure(profile, {
-			command: "test",
-			args: ["-x", remoteHelper],
-		});
-		if (existing.exitCode === 0) {
-			return;
+		const localHelper = await this.dependencies.resolveHelperBinary(inspection);
+		if (localHelper && (await this.dependencies.fileReadable(localHelper))) {
+			const hash = await this.dependencies.hashFile(localHelper);
+			expectedHelper = joinRemote(
+				remoteDirectory,
+				`${prefix}${hash.slice(0, 16)}`,
+			);
+			const existing = await this.execRemoteAllowFailure(profile, {
+				command: "test",
+				args: ["-x", expectedHelper],
+			});
+			if (existing.exitCode === 0) {
+				return expectedHelper;
+			}
 		}
 
+		const reused = await this.findReusableRemoteHelper(
+			profile,
+			remoteDirectory,
+			prefix,
+		);
+		if (reused) {
+			if (expectedHelper && reused !== expectedHelper) {
+				await this.linkRemoteHelper(
+					profile,
+					remoteDirectory,
+					reused,
+					expectedHelper,
+				);
+				return expectedHelper;
+			}
+			return reused;
+		}
+
+		const remoteOverride = this.remoteHelperOverridePath?.trim();
+		if (remoteOverride) {
+			const overrideOk = await this.execRemoteAllowFailure(profile, {
+				command: "test",
+				args: ["-x", remoteOverride],
+			});
+			if (overrideOk.exitCode === 0) {
+				return remoteOverride;
+			}
+		}
+
+		throw new Error(
+			`No remote helper found for ${inspection.platform}/${inspection.arch} under ${remoteDirectory}. ` +
+				"AutoCline never uploads the helper over SSH. Install the Cline CLI helper once on the remote " +
+				`(or reuse the stock Cline helper already in ~/.cline/remote/), then reconnect. ` +
+				"Optionally set CLINE_REMOTE_HELPER_BINARY to an executable path on the remote host.",
+		);
+	}
+
+	/** Newest executable `cline-{platform}-{arch}-*` under the remote helper directory. */
+	private async findReusableRemoteHelper(
+		profile: RemoteEnvironmentProfile,
+		remoteDirectory: string,
+		prefix: string,
+	): Promise<string | undefined> {
+		const script =
+			`dir=${shellQuote(remoteDirectory)}; pref=${shellQuote(prefix)}; ` +
+			'ls -1t "$dir"/"$pref"* 2>/dev/null | while IFS= read -r f; do ' +
+			'test -x "$f" || continue; test -d "$f" && continue; ' +
+			`printf '%s\n' "$f"; exit 0; done; exit 1`;
+		const listed = await this.execRemoteAllowFailure(profile, {
+			command: "sh",
+			args: ["-c", script],
+		});
+		if (listed.exitCode !== 0) {
+			return undefined;
+		}
+		const candidate = listed.stdout
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.find((line) => line.length > 0);
+		return candidate;
+	}
+
+	/** Point the content-addressed name at an already-installed helper (no upload). */
+	private async linkRemoteHelper(
+		profile: RemoteEnvironmentProfile,
+		remoteDirectory: string,
+		sourceHelper: string,
+		targetHelper: string,
+	): Promise<void> {
 		await this.execRemote(profile, {
 			command: "mkdir",
 			args: ["-p", remoteDirectory],
@@ -678,32 +741,14 @@ export class RemoteEnvironmentService {
 			command: "chmod",
 			args: ["700", remoteDirectory],
 		});
-		const temporaryPath = `${remoteHelper}.upload-${this.dependencies.randomId()}`;
-		const uploadCommand = `umask 077; cat > ${shellQuote(temporaryPath)}`;
-		const upload = await this.dependencies.runProcess(
-			this.sshPath,
-			[...this.buildCommandArgs(profile), uploadCommand],
-			{ timeoutMs: this.uploadTimeoutMs, inputFile: localHelper },
-		);
-		if (upload.exitCode !== 0) {
-			throw processFailure("upload remote helper", upload);
-		}
-		try {
-			await this.execRemote(profile, {
-				command: "chmod",
-				args: ["700", temporaryPath],
-			});
-			await this.execRemote(profile, {
-				command: "mv",
-				args: ["-f", temporaryPath, remoteHelper],
-			});
-		} catch (error) {
-			await this.execRemoteAllowFailure(profile, {
-				command: "rm",
-				args: ["-f", temporaryPath],
-			});
-			throw error;
-		}
+		const linkTarget =
+			sourceHelper.startsWith(`${remoteDirectory}/`)
+				? sourceHelper.slice(remoteDirectory.length + 1)
+				: sourceHelper;
+		await this.execRemote(profile, {
+			command: "ln",
+			args: ["-sfn", linkTarget, targetHelper],
+		});
 	}
 
 	/**

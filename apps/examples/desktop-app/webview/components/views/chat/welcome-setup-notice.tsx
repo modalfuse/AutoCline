@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 
 /**
  * Shown on the welcome screen when no model provider has credentials yet.
- * Without it the composer looks fully functional and the first prompt dies
- * with an opaque failure — the single worst moment of the first-run flow.
+ * AutoCline seeds LiteLLM by default; this is a fallback if that seed is
+ * missing or the user cleared providers.
  */
 export function WelcomeSetupNotice({
 	onOpenSetup,
@@ -25,30 +25,32 @@ export function WelcomeSetupNotice({
 				</span>
 				<div className="min-w-0">
 					<p className="text-sm font-semibold text-foreground">
-						Connect a model to start building
+						Choose a model to start building
 					</p>
 					<p className="mt-0.5 text-[13px] text-muted-foreground">
-						Sign in with Cline or add an API key — it takes under a minute.
+						AutoCline defaults to LiteLLM (deepseek-chat). Open model
+						settings if you need another provider — no Cline account
+						required.
 					</p>
 				</div>
 			</div>
 			<div className="flex shrink-0 items-center gap-2">
 				<Button
 					className="rounded-full"
-					onClick={onOpenSetup}
+					onClick={onOpenModelSettings}
 					size="sm"
 					type="button"
 				>
-					Connect a model
+					Model settings
 				</Button>
 				<Button
 					className="rounded-full"
-					onClick={onOpenModelSettings}
+					onClick={onOpenSetup}
 					size="sm"
 					type="button"
 					variant="ghost"
 				>
-					Model settings
+					Providers
 				</Button>
 			</div>
 		</output>
