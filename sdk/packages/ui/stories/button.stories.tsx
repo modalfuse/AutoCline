@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { Fragment, type SVGProps } from "react";
 import { fn } from "storybook/test";
-import { Button, type ButtonTone, IconButton } from "../components/button";
+import { Button, IconButton } from "../components/button";
 
 const meta: Meta<typeof Button> = {
 	title: "Components/Button",
@@ -95,139 +95,46 @@ function SparkIcon(props: SVGProps<SVGSVGElement>) {
 
 export const VariantMatrix = () => (
 	<div className="space-y-8 p-8">
-		<div>
-			<h2 className="mb-4 text-sm font-semibold">Button — variant × tone</h2>
-			<div
-				className="grid gap-3"
-				style={{ gridTemplateColumns: "auto repeat(3, auto)" }}
-			>
-				<div />
-				{VARIANTS.map((v) => (
-					<span
-						className="px-2 text-xs font-medium text-muted-foreground"
-						key={v}
-					>
-						{v}
-					</span>
-				))}
-				{TONES.map((tone) => (
-					<Fragment key={tone}>
-						<span className="flex items-center pr-4 text-xs font-medium text-muted-foreground">
-							{tone}
+		{["Button", "IconButton"].map((kind) => (
+			<div key={kind}>
+				<h2 className="mb-4 font-semibold text-sm">{kind} — variant × tone</h2>
+				<div
+					className="grid gap-3"
+					style={{ gridTemplateColumns: "auto repeat(3, auto)" }}
+				>
+					<div />
+					{VARIANTS.map((variant) => (
+						<span className="text-muted-foreground text-xs" key={variant}>
+							{variant}
 						</span>
-						{VARIANTS.map((variant) => (
-							<div className="flex" key={variant}>
-								<Button tone={tone} variant={variant}>
-									Button
-								</Button>
-							</div>
-						))}
-					</Fragment>
-				))}
+					))}
+					{TONES.map((tone) => (
+						<Fragment key={tone}>
+							<span className="text-muted-foreground text-xs">{tone}</span>
+							{VARIANTS.map((variant) =>
+								kind === "Button" ? (
+									<Button key={variant} tone={tone} variant={variant}>
+										Button
+									</Button>
+								) : (
+									<IconButton
+										key={variant}
+										icon={PlusIcon}
+										aria-label={`${variant} ${tone}`}
+										tone={tone}
+										variant={variant}
+									/>
+								),
+							)}
+						</Fragment>
+					))}
+				</div>
 			</div>
-		</div>
-
-		<div>
-			<h2 className="mb-4 text-sm font-semibold">
-				IconButton — variant × tone
-			</h2>
-			<div
-				className="grid gap-3"
-				style={{ gridTemplateColumns: "auto repeat(3, auto)" }}
-			>
-				<div />
-				{VARIANTS.map((v) => (
-					<span
-						className="px-2 text-xs font-medium text-muted-foreground"
-						key={v}
-					>
-						{v}
-					</span>
-				))}
-				{TONES.map((tone) => (
-					<Fragment key={tone}>
-						<span className="flex items-center pr-4 text-xs font-medium text-muted-foreground">
-							{tone}
-						</span>
-						{VARIANTS.map((variant) => (
-							<div className="flex" key={variant}>
-								<IconButton
-									icon={PlusIcon}
-									aria-label={`${variant} ${tone}`}
-									tone={tone}
-									variant={variant}
-								/>
-							</div>
-						))}
-					</Fragment>
-				))}
-			</div>
-		</div>
+		))}
 	</div>
 );
 
-export const Sizes = () => (
-	<div className="space-y-8 p-8">
-		<div>
-			<h2 className="mb-4 text-sm font-semibold">Button sizes</h2>
-			<div className="flex flex-wrap items-end gap-3">
-				{SIZES.map((size) => (
-					<Button key={size} size={size} tone="accent" variant="primary">
-						{size}
-					</Button>
-				))}
-			</div>
-		</div>
-
-		<div>
-			<h2 className="mb-4 text-sm font-semibold">
-				IconButton sizes (same tokens)
-			</h2>
-			<div className="flex flex-wrap items-end gap-3">
-				{SIZES.map((size) => (
-					<IconButton
-						icon={PlusIcon}
-						aria-label={size}
-						key={size}
-						size={size}
-						tone="accent"
-						variant="primary"
-					/>
-				))}
-			</div>
-		</div>
-	</div>
-);
-
-export const WithIcons = () => (
-	<div className="space-y-4 p-8">
-		<h2 className="text-sm font-semibold">
-			Button — with leading and trailing icons
-		</h2>
-		<div className="flex flex-wrap items-center gap-3">
-			<Button leadingIcon={PlusIcon} tone="accent" variant="primary">
-				New session
-			</Button>
-			<Button leadingIcon={PlusIcon} tone="accent" variant="secondary">
-				New session
-			</Button>
-			<Button trailingIcon={ChevronIcon} tone="neutral" variant="ghost">
-				More options
-			</Button>
-			<Button leadingIcon={TrashIcon} tone="destructive" variant="primary">
-				Delete
-			</Button>
-			<Button leadingIcon={TrashIcon} tone="destructive" variant="secondary">
-				Delete
-			</Button>
-			<Button leadingIcon={TrashIcon} tone="destructive" variant="ghost">
-				Remove
-			</Button>
-		</div>
-	</div>
-);
-
-export const IconSpacing = () => (
+export const IconSlots = () => (
 	<div className="space-y-4 p-8">
 		<h2 className="font-semibold text-sm">Button — icon spacing by size</h2>
 		<p className="text-muted-foreground text-sm">
@@ -236,16 +143,20 @@ export const IconSpacing = () => (
 		</p>
 		<div
 			className="grid items-center justify-items-start gap-4"
-			style={{ gridTemplateColumns: "auto repeat(4, auto)" }}
+			style={{ gridTemplateColumns: "auto repeat(5, auto)" }}
 		>
 			<div />
-			{["Text only", "Leading icon", "Trailing icon", "Both icons"].map(
-				(label) => (
-					<span className="text-muted-foreground text-xs" key={label}>
-						{label}
-					</span>
-				),
-			)}
+			{[
+				"Text only",
+				"Leading icon",
+				"Trailing icon",
+				"Both icons",
+				"Icon only",
+			].map((label) => (
+				<span className="text-muted-foreground text-xs" key={label}>
+					{label}
+				</span>
+			))}
 			{SIZES.map((size) => (
 				<Fragment key={size}>
 					<span className="text-muted-foreground text-xs">{size}</span>
@@ -277,8 +188,45 @@ export const IconSpacing = () => (
 					>
 						Button
 					</Button>
+					<IconButton
+						icon={PlusIcon}
+						aria-label={`Add (${size})`}
+						size={size}
+						variant="secondary"
+					/>
 				</Fragment>
 			))}
+		</div>
+		<div className="flex flex-wrap items-center gap-3">
+			<Button leadingIcon={SparkIcon} tone="neutral">
+				Custom SVG
+			</Button>
+			<Button
+				asChild
+				trailingIcon={ChevronIcon}
+				tone="neutral"
+				variant="secondary"
+			>
+				<a href="#icon-slots" id="icon-slots">
+					Composed link
+				</a>
+			</Button>
+			<IconButton
+				asChild
+				icon={PlusIcon}
+				aria-label="Create from link"
+				variant="secondary"
+			>
+				{/* biome-ignore lint/a11y/useAnchorContent: IconButton supplies the accessible label and icon to this composed link. */}
+				<a href="#icon-slots" />
+			</IconButton>
+			<Button
+				leadingIcon={PlusIcon}
+				className="[--cline-ui-button-icon-size:1.25rem]"
+				variant="secondary"
+			>
+				Deliberate size override
+			</Button>
 		</div>
 	</div>
 );
@@ -374,95 +322,5 @@ export const Disabled = () => (
 				</div>
 			</div>
 		))}
-	</div>
-);
-
-export const AccentTone = () => <ToneShowcase label="accent" tone="accent" />;
-
-export const NeutralTone = () => (
-	<ToneShowcase label="neutral" tone="neutral" />
-);
-
-export const DestructiveTone = () => (
-	<ToneShowcase label="destructive" tone="destructive" />
-);
-
-function ToneShowcase({ label, tone }: { label: string; tone: ButtonTone }) {
-	return (
-		<div className="space-y-6 p-8">
-			<h2 className="text-sm font-semibold">tone="{label}"</h2>
-			<div className="space-y-4">
-				{VARIANTS.map((variant) => (
-					<div className="flex items-center gap-6" key={variant}>
-						<span className="w-16 text-xs text-muted-foreground">
-							{variant}
-						</span>
-						<div className="flex items-center gap-3">
-							{SIZES.map((size) => (
-								<Button key={size} size={size} tone={tone} variant={variant}>
-									Button
-								</Button>
-							))}
-						</div>
-						<div className="flex items-center gap-2">
-							{SIZES.map((size) => (
-								<IconButton
-									icon={PlusIcon}
-									aria-label={size}
-									key={size}
-									size={size}
-									tone={tone}
-									variant={variant}
-								/>
-							))}
-						</div>
-					</div>
-				))}
-			</div>
-		</div>
-	);
-}
-
-export const IconSlots = () => (
-	<div className="space-y-6 p-8">
-		<div className="space-y-2">
-			<h2 className="font-semibold text-sm">Managed icon slots</h2>
-			<p className="text-muted-foreground text-sm">
-				Pass an SVG component. The button supplies its dimensions, spacing, and
-				accessibility.
-			</p>
-		</div>
-		<div className="flex flex-wrap items-center gap-3">
-			<Button leadingIcon={PlusIcon}>New session</Button>
-			<Button leadingIcon={SparkIcon} tone="neutral">
-				Custom SVG
-			</Button>
-			<Button
-				asChild
-				trailingIcon={ChevronIcon}
-				tone="neutral"
-				variant="secondary"
-			>
-				<a href="#icon-slots" id="icon-slots">
-					Composed link
-				</a>
-			</Button>
-			<IconButton
-				asChild
-				icon={PlusIcon}
-				aria-label="Create from link"
-				variant="secondary"
-			>
-				{/* biome-ignore lint/a11y/useAnchorContent: IconButton supplies the accessible label and icon to this composed link. */}
-				<a href="#icon-slots" />
-			</IconButton>
-			<Button
-				leadingIcon={PlusIcon}
-				className="[--cline-ui-button-icon-size:1.25rem]"
-				variant="secondary"
-			>
-				Deliberate size override
-			</Button>
-		</div>
 	</div>
 );

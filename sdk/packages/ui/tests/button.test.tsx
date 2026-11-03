@@ -591,12 +591,6 @@ describe("shared button composition", () => {
 });
 
 describe("shared button appearance API", () => {
-	it("keeps legacy SVG defaults in the exported variant helpers", () => {
-		for (const variants of [buttonVariants, iconButtonVariants]) {
-			expect(variants().split(" ")).toContain("cline-ui-button-legacy-icons");
-		}
-	});
-
 	it("exposes emphasis variants and legacy aliases with independent tone and size", () => {
 		expectTypeOf<ButtonVariant>().toEqualTypeOf<
 			"primary" | "secondary" | "ghost" | "fill" | "surface"
@@ -637,12 +631,18 @@ describe("shared button appearance API", () => {
 	] as const) {
 		it(`supports ${legacy} in components and exported variant helpers`, async () => {
 			for (const tone of ["accent", "neutral", "destructive"] as const) {
-				expect(buttonVariants({ variant: legacy, tone })).toBe(
-					buttonVariants({ variant: current, tone }),
-				);
-				expect(iconButtonVariants({ variant: legacy, tone })).toBe(
-					iconButtonVariants({ variant: current, tone }),
-				);
+				for (const variants of [buttonVariants, iconButtonVariants]) {
+					const classes = variants({ variant: legacy, tone });
+					expect(classes).toBe(variants({ variant: current, tone }));
+					expect(classes.split(" ")).toEqual(
+						expect.arrayContaining([
+							"cline-ui-button",
+							"cline-ui-button-legacy-icons",
+							`cline-ui-button-${current}`,
+							`cline-ui-button-${tone}`,
+						]),
+					);
+				}
 				await render(
 					<>
 						<Button variant={legacy} tone={tone}>
@@ -664,51 +664,9 @@ describe("shared button appearance API", () => {
 			}
 		});
 	}
-
-	for (const [name, Component] of [
-		["Button", ButtonWithIcon],
-		["IconButton", IconButtonWithIcon],
-	] as const) {
-		it(`${name} selects the neutral primary appearance`, async () => {
-			await render(
-				<Component aria-label="Continue" tone="neutral" variant="primary">
-					Continue
-				</Component>,
-			);
-			expect(
-				Array.from(container.querySelector("button")?.classList ?? []),
-			).toEqual(
-				expect.arrayContaining([
-					"cline-ui-button-primary",
-					"cline-ui-button-neutral",
-				]),
-			);
-		});
-
-		it(`${name} selects the neutral secondary appearance`, async () => {
-			await render(
-				<Component aria-label="Cancel" tone="neutral" variant="secondary">
-					Cancel
-				</Component>,
-			);
-			expect(
-				Array.from(container.querySelector("button")?.classList ?? []),
-			).toEqual(
-				expect.arrayContaining([
-					"cline-ui-button-secondary",
-					"cline-ui-button-neutral",
-				]),
-			);
-		});
-	}
 });
 
 describe("shared button press feedback", () => {
-	it("includes press feedback when consumers use the exported variant helpers", () => {
-		expect(buttonVariants().split(" ")).toContain("cline-ui-button");
-		expect(iconButtonVariants().split(" ")).toContain("cline-ui-button");
-	});
-
 	for (const [name, Component] of [
 		["Button", ButtonWithIcon],
 		["IconButton", IconButtonWithIcon],

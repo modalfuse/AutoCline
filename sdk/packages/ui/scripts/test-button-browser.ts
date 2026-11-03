@@ -2,11 +2,17 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { compile } from "@tailwindcss/node";
 import { chromium, type Page } from "playwright";
-import { type CSSProperties, createElement as h, type SVGProps } from "react";
+import {
+	type CSSProperties,
+	createElement as h,
+	type ReactNode,
+	type SVGProps,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Badge } from "../components/badge.js";
 import {
 	Button,
+	type ButtonProps,
 	type ButtonTone,
 	type ButtonVariant,
 	buttonVariants,
@@ -93,6 +99,20 @@ function FixtureIcon(props: SVGProps<SVGSVGElement>) {
 		h("path", { d: "M6 12h12M12 6v12", stroke: "currentColor" }),
 	);
 }
+// Each named layout is exercised at every size in both text directions.
+const buttonLayouts: [string, ButtonProps, ReactNode][] = [
+	["text", {}, "Text only"],
+	["leading", { leadingIcon: FixtureIcon }, "Leading icon"],
+	["trailing", { trailingIcon: FixtureIcon }, "Trailing icon"],
+	[
+		"both",
+		{ leadingIcon: FixtureIcon, trailingIcon: FixtureIcon },
+		"Both icons",
+	],
+	["unmarked", {}, unmanagedIcon()],
+	["wrapped", {}, h("span", { "data-icon": "leading" }, unmanagedIcon())],
+	["nested", {}, h("span", null, unmanagedIcon("leading"))],
+];
 const matrix = variants.flatMap((variant) =>
 	tones.map((tone) =>
 		h(
@@ -156,76 +176,30 @@ const fixture = renderToStaticMarkup(
 				}),
 			),
 			...sizes.flatMap(({ size }) => [
-				h(
-					Button,
-					{ id: `text-${size}`, key: `text-${size}`, size },
-					"Text only",
+				...buttonLayouts.map(([layout, props, content]) =>
+					h(
+						Button,
+						{
+							id: `${layout}-${size}`,
+							key: `${layout}-${size}`,
+							size,
+							...props,
+						},
+						content,
+					),
 				),
-				h(
-					Button,
-					{
-						id: `leading-${size}`,
-						key: `leading-${size}`,
-						size,
-						leadingIcon: FixtureIcon,
-					},
-					"Leading icon",
-				),
-				h(
-					Button,
-					{
-						id: `trailing-${size}`,
-						key: `trailing-${size}`,
-						size,
-						trailingIcon: FixtureIcon,
-					},
-					"Trailing icon",
-				),
-				h(
-					Button,
-					{
-						id: `both-${size}`,
-						key: `both-${size}`,
-						size,
-						leadingIcon: FixtureIcon,
-						trailingIcon: FixtureIcon,
-					},
-					"Both icons",
-				),
-				h(
-					Button,
-					{ id: `unmarked-${size}`, key: `unmarked-${size}`, size },
-					unmanagedIcon(),
-					"Unmarked icon",
-				),
-				h(
-					Button,
-					{ id: `wrapped-${size}`, key: `wrapped-${size}`, size },
-					h("span", { "data-icon": "leading" }, unmanagedIcon()),
-					"Marked wrapper",
-				),
-				h(
-					Button,
-					{ id: `nested-${size}`, key: `nested-${size}`, size },
-					h("span", null, unmanagedIcon("leading")),
-					"Nested marker",
-				),
-				h(IconButton, {
-					id: `icon-${size}`,
-					key: `icon-${size}`,
-					size,
-					"aria-label": "Add",
-					icon: FixtureIcon,
-				}),
-				h(
-					IconButton,
-					{
-						id: `legacy-icon-${size}`,
-						key: `legacy-icon-${size}`,
-						size,
-						"aria-label": "Add",
-					},
-					unmanagedIcon(),
+				...([false, true] as const).map((legacy) =>
+					h(
+						IconButton,
+						{
+							id: `${legacy ? "legacy-icon" : "icon"}-${size}`,
+							key: `${legacy ? "legacy-icon" : "icon"}-${size}`,
+							size,
+							"aria-label": "Add",
+							icon: legacy ? undefined : FixtureIcon,
+						},
+						legacy ? unmanagedIcon() : null,
+					),
 				),
 			]),
 			h(IconButton, { id: "icon", "aria-label": "Add", icon: FixtureIcon }),
@@ -365,52 +339,60 @@ async function styles(page: Page, selector: string) {
 	});
 }
 
+// Resolve computed properties, theme tokens, and literal colors through the
+// same browser canvas so color-mix and alpha handling match in every check.
+async function sampleColors(page: Page, samples: [string, string[]][]) {
+	return page.evaluate((samples) => {
+		const canvas = document.createElement("canvas");
+		canvas.width = canvas.height = 1;
+		const context = canvas.getContext("2d");
+		if (!context) throw new Error("Canvas unavailable");
+		return samples.map(([selector, properties]) => {
+			const element = document.querySelector(selector);
+			if (!element) throw new Error(`Missing color fixture: ${selector}`);
+			const style = getComputedStyle(element);
+			return properties.map((property) => {
+				const color = style.getPropertyValue(property).trim() || property;
+				if (!CSS.supports("color", color))
+					throw new Error(`Invalid color: ${color}`);
+				context.clearRect(0, 0, 1, 1);
+				context.fillStyle = color;
+				context.fillRect(0, 0, 1, 1);
+				return Array.from(context.getImageData(0, 0, 1, 1).data);
+			});
+		});
+	}, samples);
+}
+
 async function contrast(
 	page: Page,
 	selector: string,
 	property: "color" | "outlineColor",
 ) {
-	return page.locator(selector).evaluate((element, property) => {
-		const canvas = document.createElement("canvas");
-		canvas.width = canvas.height = 1;
-		const context = canvas.getContext("2d");
-		if (!context) throw new Error("Canvas unavailable");
-		const rgba = (color: string) => {
-			context.clearRect(0, 0, 1, 1);
-			context.fillStyle = color;
-			context.fillRect(0, 0, 1, 1);
-			return Array.from(context.getImageData(0, 0, 1, 1).data);
-		};
-		const blend = (fg: number[], bg: number[]) =>
-			fg
-				.slice(0, 3)
-				.map(
-					(channel, i) => channel * (fg[3] / 255) + bg[i] * (1 - fg[3] / 255),
-				);
-		const luminance = (rgb: number[]) =>
-			rgb.slice(0, 3).reduce((total, channel, i) => {
-				const value = channel / 255;
-				return (
-					total +
-					(value <= 0.04045
-						? value / 12.92
-						: ((value + 0.055) / 1.055) ** 2.4) *
-						[0.2126, 0.7152, 0.0722][i]
-				);
-			}, 0);
-		const surface = document.querySelector("#surface");
-		if (!surface) throw new Error("Missing surface");
-		const style = getComputedStyle(element);
-		const behind = rgba(getComputedStyle(surface).backgroundColor);
-		const background =
-			property === "outlineColor"
-				? behind
-				: blend(rgba(style.backgroundColor), behind);
-		const foreground = blend(rgba(style[property]), background);
-		const a = luminance(foreground);
-		const b = luminance(background);
-		return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-	}, property);
+	const [[behind], [fill, text]] = await sampleColors(page, [
+		["#surface", ["background-color"]],
+		[
+			selector,
+			["background-color", property === "color" ? "color" : "outline-color"],
+		],
+	]);
+	const blend = (fg: number[], bg: number[]) =>
+		fg
+			.slice(0, 3)
+			.map((channel, i) => channel * (fg[3] / 255) + bg[i] * (1 - fg[3] / 255));
+	const luminance = (rgb: number[]) =>
+		rgb.slice(0, 3).reduce((total, channel, i) => {
+			const value = channel / 255;
+			return (
+				total +
+				(value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4) *
+					[0.2126, 0.7152, 0.0722][i]
+			);
+		}, 0);
+	const background = property === "outlineColor" ? behind : blend(fill, behind);
+	const a = luminance(blend(text, background));
+	const b = luminance(background);
+	return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
 async function switchColors(
@@ -419,38 +401,21 @@ async function switchColors(
 	background: string,
 	thumb: string,
 ) {
-	return page.locator(`#${id}`).evaluate(
-		(input, { background, thumb }) => {
-			const root = input.parentElement;
-			const track = root?.querySelector(".cline-ui-switch__track");
-			const knob = root?.querySelector(".cline-ui-switch__thumb");
-			if (!root || !track || !knob) throw new Error("Missing switch fixture");
-			const canvas = document.createElement("canvas");
-			canvas.width = canvas.height = 1;
-			const context = canvas.getContext("2d");
-			if (!context) throw new Error("Canvas unavailable");
-			const rgba = (color: string) => {
-				assertColor(color);
-				context.clearRect(0, 0, 1, 1);
-				context.fillStyle = color;
-				context.fillRect(0, 0, 1, 1);
-				return Array.from(context.getImageData(0, 0, 1, 1).data);
-			};
-			function assertColor(color: string) {
-				if (!CSS.supports("color", color))
-					throw new Error(`Invalid switch color: ${color}`);
-			}
-			const token = (name: string) =>
-				rgba(getComputedStyle(root).getPropertyValue(`--${name}`));
-			return {
-				track: rgba(getComputedStyle(track).backgroundColor),
-				thumb: rgba(getComputedStyle(knob).backgroundColor),
-				expectedTrack: token(background),
-				expectedThumb: thumb === "white" ? rgba("white") : token(thumb),
-			};
-		},
-		{ background, thumb },
+	const [[expectedTrack, expectedThumb], [track], [knob]] = await sampleColors(
+		page,
+		[
+			[
+				`#${id}`,
+				[`--${background}`, thumb === "white" ? "white" : `--${thumb}`],
+			],
+			[`#${id} + .cline-ui-switch__track`, ["background-color"]],
+			[
+				`#${id} + .cline-ui-switch__track .cline-ui-switch__thumb`,
+				["background-color"],
+			],
+		],
 	);
+	return { track, thumb: knob, expectedTrack, expectedThumb };
 }
 
 const browser = await chromium.launch();
