@@ -219,58 +219,29 @@ describe("RemoteEnvironmentService", () => {
 		).rejects.toThrow("exited before the upload completed");
 	});
 
-	it.each([
-		"connect",
-		"delete",
-	])("recovers lost-Hub cleanup with a deleted helper before %s", async (action) => {
+	it("does not shut down or enqueue cleanup for a shared Hub on dispose", async () => {
 		const commands: string[] = [];
 		let offline = false;
-		let requiredIdentity: string | undefined;
-		let helperMissing = false;
-		let uploads = 0;
+		let shutdowns = 0;
 		const dependencies: Partial<RemoteEnvironmentDependencies> = {
-			runProcess: async (_executable, args, options) => {
+			runProcess: async (_executable, args) => {
 				const command = args.at(-1) ?? "";
 				commands.push(command);
 				if (offline) throw new Error("Network unavailable");
-				if (options.inputFile) {
-					uploads += 1;
-					helperMissing = false;
-				}
-				if (helperMissing && command.includes("'test' '-x'"))
-					return { stdout: "", stderr: "", exitCode: 1 };
-				if (
-					helperMissing &&
-					command.includes("ls -1t") &&
-					command.includes(".cline/remote")
-				) {
-					// Reusing an on-host helper clears the missing state (replaces upload).
-					helperMissing = false;
-					return success(
-						"/home/dev/.cline/remote/cline-linux-x64-aaaaaaaaaaaaaaaa\n",
-					);
-				}
-				if (helperMissing && command.includes("'hub' 'stop'"))
-					throw new Error("Helper missing");
-				if (requiredIdentity && !args.includes(requiredIdentity)) {
-					throw new Error("Obsolete SSH identity");
-				}
 				if (command.includes("uname -s"))
 					return inspection("Linux", "x86_64", "/home/dev");
-				if (command.includes("'hub' 'ensure'"))
+				if (command.includes("python3") && command.includes("-c"))
 					return success(
-						'{"url":"ws://127.0.0.1:25463/hub","authToken":"token"}',
+						'{"url":"ws://127.0.0.1:25463/hub","authToken":"token","port":25463,"pathname":"/hub"}',
 					);
 				return success();
 			},
 			resolveHelperBinary: async () => "/helper",
 			fileReadable: async () => true,
 			hashFile: async () => "0123456789abcdef",
-			// Once the Hub is down, the desktop can neither probe nor shut it down.
 			verifyHubConnection: async () => !offline,
-			// The Hub is unreachable from the desktop, so its direct shutdown
-			// request must surface instead of being swallowed.
 			requestHubShutdown: async () => {
+				shutdowns += 1;
 				if (offline) throw new Error("Network unavailable");
 				return true;
 			},
@@ -288,41 +259,19 @@ describe("RemoteEnvironmentService", () => {
 		});
 		await service.connect(first.id);
 		await service.connect(second.id);
-		const ensures = commands.filter((command) =>
-			command.includes("'hub' 'ensure'"),
+		const lookups = commands.filter(
+			(command) => command.includes("python3") && command.includes("-c"),
 		);
-		expect(ensures).toHaveLength(2);
-		expect(ensures[0]).not.toBe(ensures[1]);
+		expect(lookups).toHaveLength(2);
+		// Shared-hub lookup depends only on hubUrls, so both connects reuse the
+		// same discovery query (unlike private port-0 hubs with unique paths).
+		expect(lookups[0]).toBe(lookups[1]);
 		offline = true;
-		// Teardown must reach the Hub to shut down the owned remote Hub, so an
-		// unreachable network surfaces here instead of leaving a Hub running.
-		await expect(service.dispose()).rejects.toThrow("Network unavailable");
-		// Both owned Hubs are still owed a stop.
+		await expect(service.dispose()).resolves.toBeUndefined();
+		expect(shutdowns).toBe(0);
 		expect(
 			await readdir(`${profilesPath}.cleanup`).catch(() => []),
-		).toHaveLength(2);
-		offline = false;
-		const restarted = createService(dependencies);
-		requiredIdentity = "/keys/rotated";
-		helperMissing = true;
-		await restarted.upsert({ ...first, identityFile: requiredIdentity });
-		if (action === "connect") await restarted.connect(first.id);
-		else expect(await restarted.delete(first.id)).toBe(true);
-		// This profile's owned Hub is stopped over SSH with the rotated identity.
-		// (The other profile's record belongs to its own reconnect and is left
-		// for it to consume.)
-		expect(uploads).toBe(0);
-		await restarted.dispose().catch(() => undefined);
-		// The record this profile was owed a stop for is consumed; the other
-		// profile keeps its own record for its next reconnect.
-		const remaining = await readdir(`${profilesPath}.cleanup`).catch(() => []);
-		expect(remaining).toHaveLength(1);
-		const stop = commands
-			.filter((command) => command.includes("'hub' 'stop'"))
-			.at(-1);
-		expect(stop?.split("'--discovery-path' ")[1]).toBe(
-			ensures[0]?.split("'--discovery-path' ")[1],
-		);
+		).toEqual([]);
 	});
 
 	it("stops a Hub recorded by an earlier dedicated helper with its own flag", async () => {
@@ -508,9 +457,9 @@ describe("RemoteEnvironmentService", () => {
 						"/home/dev/.cline/remote/cline-linux-arm64-deadbeefdeadbeef\n",
 					);
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (command.includes("python3") && command.includes("-c")) {
 					return success(
-						'{"url":"ws://127.0.0.1:25463/hub","authToken":"remote-secret"}\n',
+						'{"url":"ws://127.0.0.1:25463/hub","port":25463,"pathname":"/hub","authToken":"remote-secret"}\n',
 					);
 				}
 				return success();
@@ -585,13 +534,11 @@ describe("RemoteEnvironmentService", () => {
 				invocation.args.includes("ClearAllForwardings=yes"),
 			),
 		).toBe(true);
-		const ensure = invocations.find((invocation) =>
-			invocation.args.at(-1)?.includes("'hub' 'ensure'"),
+		const lookup = invocations.find((invocation) =>
+			invocation.args.at(-1)?.includes("python3"),
 		);
-		expect(ensure?.args.at(-1)).toContain("'/home/dev'");
-		expect(ensure?.args.at(-1)).toMatch(
-			/\/home\/dev\/\.cline\/data\/remote\/[a-f0-9-]+\.json/,
-		);
+		expect(lookup?.args.at(-1)).toContain("'/home/dev'");
+		expect(lookup?.args.at(-1)).toContain("ws://100.101.163.69:25463/hub");
 		// Every SSH invocation is a one-shot command; nothing holds a forward open.
 		for (const invocation of invocations) {
 			expect(invocation.args).not.toContain("-L");
@@ -599,10 +546,7 @@ describe("RemoteEnvironmentService", () => {
 		}
 
 		await expect(service.disconnect()).resolves.toBe(true);
-		expect(requestHubShutdown).toHaveBeenCalledWith(
-			"ws://100.101.163.69:25463/hub",
-			"remote-secret",
-		);
+		expect(requestHubShutdown).not.toHaveBeenCalled();
 		expect(service.getActive()).toBeUndefined();
 	});
 
@@ -614,7 +558,7 @@ describe("RemoteEnvironmentService", () => {
 				commands.push(command);
 				if (command.includes("uname -s"))
 					return inspection("Linux", "aarch64", "/home/dev");
-				if (command.includes("'hub' 'ensure'"))
+				if (command.includes("python3") && command.includes("-c"))
 					return success(
 						'{"url":"ws://127.0.0.1:25463/hub","authToken":"secret"}',
 					);
@@ -628,14 +572,15 @@ describe("RemoteEnvironmentService", () => {
 		const profile = await service.upsert({ name: "Remote", host: "remote" });
 		await expect(service.connect(profile.id)).rejects.toThrow(/has no hubUrls/);
 		expect(service.getConnection(profile.id)).toBeUndefined();
-		// The Hub started for this attempt is still stopped: a failed connect never
-		// leaves an owned Hub running on the remote host.
-		const ensure = commands.find((command) =>
-			command.includes("'hub' 'ensure'"),
-		);
-		const stop = commands.find((command) => command.includes("'hub' 'stop'"));
-		expect(stop?.split("'--discovery-path' ")[1]).toBe(
-			ensure?.split("'--discovery-path' ")[1],
+		// Direct mode never starts a private Hub, so a refused profile leaves none
+		// to stop.
+		expect(
+			commands.some(
+				(command) => command.includes("python3") && command.includes("-c"),
+			),
+		).toBe(false);
+		expect(commands.some((command) => command.includes("'hub' 'stop'"))).toBe(
+			false,
 		);
 	});
 
@@ -647,7 +592,7 @@ describe("RemoteEnvironmentService", () => {
 				commands.push(command);
 				if (command.includes("uname -s"))
 					return inspection("Linux", "aarch64", "/home/dev");
-				if (command.includes("'hub' 'ensure'"))
+				if (command.includes("python3") && command.includes("-c"))
 					return success(
 						'{"url":"ws://127.0.0.1:25463/hub","authToken":"secret"}',
 					);
@@ -667,8 +612,10 @@ describe("RemoteEnvironmentService", () => {
 			/ws:\/\/100\.101\.163\.69:25463\/hub \(also configured: ws:\/\/other:25463\/hub\)/,
 		);
 		expect(service.getConnection(profile.id)).toBeUndefined();
-		const stop = commands.find((command) => command.includes("'hub' 'stop'"));
-		expect(stop).toBeDefined();
+		// Shared-Hub lookup does not start a private Hub, so nothing to stop.
+		expect(commands.some((command) => command.includes("'hub' 'stop'"))).toBe(
+			false,
+		);
 	});
 
 	it("bounds Hub shutdown on disconnect", async () => {
@@ -682,9 +629,9 @@ describe("RemoteEnvironmentService", () => {
 					if (command.includes("uname -s")) {
 						return inspection("Linux", "aarch64", "/home/pi");
 					}
-					if (command.includes("'hub' 'ensure'")) {
+					if (command.includes("python3") && command.includes("-c")) {
 						return success(
-							'{"url":"ws://127.0.0.1:25463/hub","authToken":"token"}\n',
+							'{"url":"ws://127.0.0.1:25463/hub","port":25463,"pathname":"/hub","authToken":"token"}\n',
 						);
 					}
 					return success();
@@ -705,7 +652,7 @@ describe("RemoteEnvironmentService", () => {
 		await service.connect(profile.id);
 
 		await expect(service.disconnect(profile.id)).resolves.toBe(true);
-		expect(requestHubShutdown).toHaveBeenCalledOnce();
+		expect(requestHubShutdown).not.toHaveBeenCalled();
 	});
 
 	it("reuses an already-installed content-addressed helper", async () => {
@@ -717,9 +664,9 @@ describe("RemoteEnvironmentService", () => {
 				if (command.includes("uname -s")) {
 					return inspection("Darwin", "arm64", "/Users/dev");
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (command.includes("python3") && command.includes("-c")) {
 					return success(
-						'{"url":"ws://localhost:29000/hub","authToken":"token"}\n',
+						'{"url":"ws://127.0.0.1:25463/hub","port":25463,"pathname":"/hub","authToken":"token"}\n',
 					);
 				}
 				return success();
@@ -757,7 +704,7 @@ describe("RemoteEnvironmentService", () => {
 						"/home/dev/.cline/remote/cline-linux-x64-08d9954c9b8b79bd\n",
 					);
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (command.includes("python3") && command.includes("-c")) {
 					return success(
 						'{"url":"ws://127.0.0.1:25463/hub","authToken":"token"}\n',
 					);
@@ -778,12 +725,18 @@ describe("RemoteEnvironmentService", () => {
 		expect(invocations.some((invocation) => invocation.options.inputFile)).toBe(
 			false,
 		);
-		const ensure = invocations.find((invocation) =>
-			invocation.args.at(-1)?.includes("'hub' 'ensure'"),
-		);
-		expect(ensure?.args.at(-1)).toContain(
-			"/home/dev/.cline/remote/cline-linux-x64-0149bbee2827d5f4",
-		);
+		const lookup = invocations.find((invocation) => {
+			const remote = invocation.args.at(-1) ?? "";
+			return remote.includes("python3") && remote.includes("-c");
+		});
+		expect(lookup?.args.at(-1)).toContain("ws://100.101.163.69:25463/hub");
+		expect(
+			invocations.some((invocation) =>
+				(invocation.args.at(-1) ?? "").includes(
+					"cline-linux-x64-0149bbee2827d5f4",
+				),
+			),
+		).toBe(true);
 	});
 
 	it("errors without uploading when no remote helper exists", async () => {
@@ -831,7 +784,7 @@ describe("RemoteEnvironmentService", () => {
 				if (command.includes("uname -s")) {
 					return inspection("Linux", "aarch64", "/home/pi");
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (command.includes("python3") && command.includes("-c")) {
 					return success(
 						'{"url":"ws://127.0.0.1:25463/hub","authToken":"token"}\n',
 					);
@@ -902,7 +855,7 @@ describe("RemoteEnvironmentService", () => {
 				if (command.includes("uname -s")) {
 					return inspection("Linux", "aarch64", "/home/dev");
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (command.includes("python3") && command.includes("-c")) {
 					return destination === "host-b"
 						? { stdout: "", stderr: "bootstrap failed", exitCode: 1 }
 						: success(
@@ -943,7 +896,7 @@ describe("RemoteEnvironmentService", () => {
 				if (command.includes("uname -s")) {
 					return inspection("Linux", "aarch64", `/home/${destination}`);
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (command.includes("python3") && command.includes("-c")) {
 					return success(
 						`{"url":"ws://127.0.0.1:25463/hub","authToken":"${destination}-token"}\n`,
 					);

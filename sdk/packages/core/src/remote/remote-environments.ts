@@ -15,12 +15,6 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { URL } from "node:url";
-import {
-	CLINE_HUB_LAUNCHER_CLIENT_ENV,
-	CLINE_HUB_LAUNCHER_TRANSPORT_ENV,
-	CLINE_HUB_LAUNCHER_VERSION_ENV,
-	getClineClientIdentity,
-} from "@cline/shared";
 import { resolveClineDataDir } from "@cline/shared/storage";
 import { requestHubShutdown, verifyHubConnection } from "../hub/client";
 
@@ -169,7 +163,13 @@ interface PendingHubCleanup {
 }
 
 interface ManagedConnection {
-	cleanup: PendingHubCleanup;
+	/**
+	 * Present only when this client started a private remote Hub. Direct
+	 * hubUrls connections reuse a durable shared Hub and must not stop it.
+	 */
+	cleanup?: PendingHubCleanup;
+	/** False when dialing a pre-existing Hub named in hubUrls. */
+	ownsRemoteHub: boolean;
 	connection: RemoteEnvironmentConnection;
 }
 
@@ -180,7 +180,6 @@ const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30;
 const DEFAULT_COMMAND_TIMEOUT_MS = 60_000;
 const DEFAULT_HUB_SHUTDOWN_TIMEOUT_MS = 2_000;
 const REMOTE_HELPER_DIRECTORY = ".cline/remote";
-const REMOTE_DISCOVERY_DIRECTORY = ".cline/data/remote";
 const REMOTE_INSPECTION_SENTINEL = "CLINE_REMOTE_INSPECT_V1";
 const HUB_PROTOCOLS = new Set(["ws:", "wss:"]);
 
@@ -248,7 +247,6 @@ function hubUrlPort(url: string | undefined): number {
 
 export class RemoteEnvironmentService {
 	private readonly profilesPath: string;
-	private readonly ownerId = randomUUID();
 	private readonly sshPath: string;
 	private readonly knownHostsPath?: string;
 	private readonly connectTimeoutSeconds: number;
@@ -419,25 +417,13 @@ export class RemoteEnvironmentService {
 		}
 
 		this.setStatus(id, "connecting", "Connecting to remote environment");
-		let bootstrap: { helper: string; discoveryPath: string } | undefined;
 		try {
 			const inspection = await this.inspectRemote(profile);
 			await this.validateDirectory(profile, inspection.home);
-			const remoteHelper = await this.ensureHelper(profile, inspection);
+			// Ensure a helper exists for SSH helper-path checks / legacy cleanup
+			// retries; shared Hub connect does not start a private hub with it.
+			await this.ensureHelper(profile, inspection);
 
-			const discoveryPath = joinRemote(
-				inspection.home,
-				`${REMOTE_DISCOVERY_DIRECTORY}/${this.ownerId}-${createHash("sha256").update(profile.id).digest("hex").slice(0, 16)}.json`,
-			);
-			bootstrap = { helper: remoteHelper, discoveryPath };
-			// The remote helper only reports the Hub it is serving; it does not
-			// open a tunnel. The desktop dials the configured URLs directly.
-			const ensureResult = await this.execRemote(
-				profile,
-				remoteHubEnsureCommand(remoteHelper, inspection.home, discoveryPath),
-			);
-			const hub = parseRemoteHubResult(ensureResult.stdout);
-			const remoteHubUrl = `ws://127.0.0.1:${hub.port}${hub.pathname}`;
 			const hubUrls = resolveRemoteHubUrls(profile);
 			if (hubUrls.length === 0) {
 				throw new Error(
@@ -450,6 +436,15 @@ export class RemoteEnvironmentService {
 			// reachable SSH host with an unreachable Hub fails loudly instead of
 			// silently degrading.
 			const endpoint = hubUrls[0] as string;
+			// Direct Hub mode: authenticate against the durable Hub already listening
+			// at hubUrls. A private `hub ensure --port 0` publishes a different
+			// authToken that cannot open that endpoint; do not start or stop one.
+			const hub = await this.resolveSharedRemoteHub(
+				profile,
+				inspection.home,
+				endpoint,
+			);
+			const remoteHubUrl = `ws://127.0.0.1:${hub.port}${hub.pathname}`;
 			if (
 				!(await this.dependencies.verifyHubConnection(endpoint, hub.authToken))
 			) {
@@ -475,7 +470,7 @@ export class RemoteEnvironmentService {
 			};
 			const managed: ManagedConnection = {
 				connection,
-				cleanup: { profile, helper: remoteHelper, discoveryPath },
+				ownsRemoteHub: false,
 			};
 			this.connections.set(id, managed);
 			this.activeProfileId = id;
@@ -488,31 +483,8 @@ export class RemoteEnvironmentService {
 					await this.stopManagedHub(previousManaged);
 				}
 			}
-			bootstrap = undefined;
 			return { ...connection, profile: { ...connection.profile } };
 		} catch (error) {
-			let cleanupError: unknown;
-			if (bootstrap) {
-				try {
-					// An independent SSH command works even when the Hub URL never
-					// answered from this machine.
-					await this.execRemote(
-						profile,
-						remoteHubStopCommand(bootstrap.helper, bootstrap.discoveryPath),
-					);
-				} catch (failure) {
-					cleanupError = failure;
-					await this.persistPendingCleanup({ profile, ...bootstrap });
-				}
-			}
-			if (cleanupError) {
-				const failure = new Error(
-					`${errorMessage(error)}; remote Hub cleanup failed: ${errorMessage(cleanupError)}`,
-					{ cause: error },
-				);
-				this.setStatus(id, "error", failure.message);
-				throw failure;
-			}
 			this.setStatus(id, "error", errorMessage(error));
 			throw error;
 		}
@@ -546,7 +518,9 @@ export class RemoteEnvironmentService {
 		if (!reachable) {
 			// Nothing could stop the Hub directly, so the owned remote Hub is
 			// recorded for the SSH cleanup retry instead of being forgotten.
-			await this.persistPendingCleanup(managed.cleanup).catch(() => undefined);
+			if (managed.ownsRemoteHub && managed.cleanup) {
+				await this.persistPendingCleanup(managed.cleanup).catch(() => undefined);
+			}
 			// The Hub is gone: report the loss so the UI stops showing a live
 			// session instead of a clean disconnect it never asked for.
 			const status = this.setStatus(
@@ -758,6 +732,10 @@ export class RemoteEnvironmentService {
 	 * without a tunnel process to watch.
 	 */
 	private async stopManagedHub(managed: ManagedConnection): Promise<boolean> {
+		// Shared Hubs named in hubUrls outlive the desktop session; only detach.
+		if (!managed.ownsRemoteHub) {
+			return true;
+		}
 		let timeout: ReturnType<typeof setTimeout> | undefined;
 		let reachable = true;
 		try {
@@ -779,6 +757,30 @@ export class RemoteEnvironmentService {
 			if (timeout) clearTimeout(timeout);
 		}
 		return reachable;
+	}
+
+	/**
+	 * Reads the auth token of the durable Hub already listening at `endpoint`
+	 * from the remote host's discovery records. Does not start or stop a Hub.
+	 */
+	private async resolveSharedRemoteHub(
+		profile: RemoteEnvironmentProfile,
+		home: string,
+		endpoint: string,
+	): Promise<{ port: number; pathname: string; authToken: string }> {
+		const result = await this.execRemote(
+			profile,
+			remoteHubAuthLookupCommand(home, endpoint),
+		);
+		try {
+			return parseRemoteHubResult(result.stdout);
+		} catch (error) {
+			throw new Error(
+				`Could not find a running Hub discovery record for ${endpoint} on the remote host. ` +
+					"Start the shared Hub there (for example `cline hub ensure --port 25463`) before connecting.",
+				{ cause: error },
+			);
+		}
 	}
 
 	private async inspectRemote(
@@ -1114,46 +1116,44 @@ export function remoteHelperBinaryFilename(target: RemoteHelperTarget): string {
 }
 
 /**
- * Remote Hubs are CLI-managed: the staged Cline CLI starts (or reuses) a
- * loopback Hub tracked by a discovery record that this client owns, so the
- * user's own CLI Hub on that host is never read or stopped. The discovery
- * path comes last so a stop command can be matched to the ensure it undoes.
+ * SSH one-shot that prints discovery JSON for the Hub already listening at
+ * `endpoint` (matched by exact URL in `urls`/`url`, else by port).
  */
-function remoteHubEnsureCommand(
-	cli: string,
-	cwd: string,
-	discoveryPath: string,
+function remoteHubAuthLookupCommand(
+	home: string,
+	endpoint: string,
 ): RemoteCommandInput {
-	const launcher = getClineClientIdentity();
+	const script = [
+		"import json,glob,sys",
+		"endpoint=sys.argv[1]",
+		"home=sys.argv[2]",
+		"from urllib.parse import urlparse",
+		"u=urlparse(endpoint)",
+		"port=int(u.port or (443 if u.scheme in ('wss','https') else 80))",
+		"paths=[]",
+		"for pattern in (home+'/.cline/data/locks/hub/owners/*.json', home+'/.cline/data/remote/*.json'):",
+		" paths.extend(sorted(glob.glob(pattern)))",
+		"matched=None",
+		"for path in paths:",
+		" if path.endswith('.lock') or 'journal' in path or path.endswith('.instance.lock'):",
+		"  continue",
+		" try:",
+		"  data=json.load(open(path))",
+		" except Exception:",
+		"  continue",
+		" if not isinstance(data,dict) or not data.get('authToken'):",
+		"  continue",
+		" urls=list(data.get('urls') or [])",
+		" if data.get('url'): urls.append(data['url'])",
+		" if endpoint in urls or data.get('port')==port:",
+		"  matched=data; break",
+		"if not matched:",
+		" sys.stderr.write('no hub discovery for '+endpoint+'\\n'); sys.exit(1)",
+		"print(json.dumps({'url': matched.get('url') or ('ws://127.0.0.1:%d/hub'%port), 'port': matched.get('port') or port, 'pathname': '/hub', 'authToken': matched['authToken']}))",
+	].join("\n")
 	return {
-		command: "env",
-		args: [
-			"CLINE_NO_AUTO_UPDATE=1",
-			// The remote daemon's telemetry records who started it; the staged
-			// CLI would otherwise report itself.
-			`${CLINE_HUB_LAUNCHER_CLIENT_ENV}=${launcher?.name?.trim() || "cline"}`,
-			...(launcher?.version?.trim()
-				? [`${CLINE_HUB_LAUNCHER_VERSION_ENV}=${launcher.version.trim()}`]
-				: []),
-			`${CLINE_HUB_LAUNCHER_TRANSPORT_ENV}=ssh`,
-			cli,
-			"hub",
-			"ensure",
-			"--json",
-			"--allow-port-fallback",
-			"--no-connectors",
-			"--login-shell-path",
-			"--cwd",
-			cwd,
-			"--host",
-			"127.0.0.1",
-			"--port",
-			"0",
-			"--pathname",
-			"/hub",
-			"--discovery-path",
-			discoveryPath,
-		],
+		command: "python3",
+		args: ["-c", script, endpoint, home],
 	};
 }
 
