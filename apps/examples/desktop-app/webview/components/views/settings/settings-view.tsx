@@ -151,7 +151,10 @@ export function SettingsView({
 	const [detailResetToken, setDetailResetToken] = useState(0);
 
 	useEffect(() => {
-		if (section !== "Providers") {
+		// Keep provider selection and add dialog state when navigating between
+		// Keys and Providers (they share the same content), but clear it when
+		// leaving to other sections.
+		if (section !== "Keys" && section !== "Providers") {
 			setSelectedProviderId(null);
 			setAddingProvider(false);
 		}
@@ -217,7 +220,8 @@ export function SettingsView({
 	}, [setProvidersWithCache]);
 
 	useEffect(() => {
-		if (activeNav !== "Providers") {
+		// Both "Keys" and "Providers" pages need the provider catalog loaded.
+		if (activeNav !== "Keys" && activeNav !== "Providers") {
 			return;
 		}
 		const timeoutId = window.setTimeout(() => {
