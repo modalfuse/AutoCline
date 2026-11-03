@@ -8,7 +8,6 @@ import {
 	useContext,
 	useState,
 } from "react";
-import { IconButton, type IconButtonProps } from "./button.js";
 
 /** Presentation only. Hosts retain drafts, input events, menus, and runtime actions. */
 export type AgentComposerVariant = "welcome" | "conversation";
@@ -222,11 +221,8 @@ export const AgentComposerActions = forwardRef<
 	);
 });
 
-export type AgentComposerStopButtonProps = Omit<
-	IconButtonProps,
-	"variant" | "aria-label"
-> &
-	VariantProps & { "aria-label"?: string };
+export type AgentComposerStopButtonProps = ComponentPropsWithoutRef<"button"> &
+	VariantProps;
 
 export const AgentComposerStopButton = forwardRef<
 	HTMLButtonElement,
@@ -237,47 +233,38 @@ export const AgentComposerStopButton = forwardRef<
 ) {
 	const variant = useAgentComposerVariant(variantProp);
 	return (
-		<IconButton
-			aria-label="Stop agent"
-			size="xs"
-			tone="neutral"
-			variant="primary"
+		<button
 			{...props}
 			ref={ref}
 			className={clsx(
-				"[&_rect]:fill-current",
-				variant === "welcome" ? "rounded-cline-ui-md" : "rounded-full",
+				variant === "welcome"
+					? "bg-cline-ui-foreground p-1.5 text-cline-ui-background hover:bg-cline-ui-destructive hover:text-cline-ui-destructive-foreground rounded-cline-ui-md"
+					: "bg-cline-ui-foreground p-1.5 text-cline-ui-background hover:bg-cline-ui-destructive hover:text-cline-ui-destructive-foreground rounded-full",
 				className,
 			)}
 		/>
 	);
 });
 
-export type AgentComposerSendButtonProps = Omit<
-	IconButtonProps,
-	"variant" | "aria-label"
-> &
-	VariantProps & { "aria-label"?: string };
+export type AgentComposerSendButtonProps = ComponentPropsWithoutRef<"button"> &
+	VariantProps;
 
 export const AgentComposerSendButton = forwardRef<
 	HTMLButtonElement,
 	AgentComposerSendButtonProps
 >(function AgentComposerSendButton(
-	{ variant: variantProp, className, type = "submit", ...props },
+	{ variant: variantProp, className, ...props },
 	ref,
 ) {
 	const variant = useAgentComposerVariant(variantProp);
 	return (
-		<IconButton
-			aria-label="Send message"
-			size="xs"
-			tone="accent"
-			variant="primary"
+		<button
 			{...props}
-			type={type}
 			ref={ref}
 			className={clsx(
-				variant === "welcome" ? "rounded-cline-ui-md" : "rounded-full",
+				variant === "welcome"
+					? "p-1.5 disabled:cursor-not-allowed disabled:opacity-50 rounded-cline-ui-md bg-[linear-gradient(145deg,var(--primary-emphasis),var(--primary))] text-cline-ui-primary-foreground shadow-sm hover:bg-cline-ui-primary-emphasis hover:bg-none"
+					: "p-1.5 disabled:cursor-not-allowed disabled:opacity-50 rounded-full bg-cline-ui-primary text-cline-ui-primary-foreground hover:bg-cline-ui-primary-emphasis",
 				className,
 			)}
 		/>

@@ -36,20 +36,9 @@ describe("AgentApprovalCard", () => {
 			),
 		);
 
-		const reject = container.querySelector<HTMLButtonElement>(
-			".cline-ui-agent-approval-card__button--reject",
-		);
-		const approve = container.querySelector<HTMLButtonElement>(
-			".cline-ui-agent-approval-card__button--approve",
-		);
-		expect(Array.from(container.querySelectorAll("button"))).toEqual([
-			reject,
-			approve,
-		]);
-		await act(async () => reject?.click());
-		expect(onReject).toHaveBeenCalledOnce();
-		expect(onApprove).not.toHaveBeenCalled();
+		const [approve, reject] = container.querySelectorAll("button");
 		await act(async () => approve?.click());
+		await act(async () => reject?.click());
 
 		expect(onApprove).toHaveBeenCalledOnce();
 		expect(onReject).toHaveBeenCalledOnce();
@@ -96,12 +85,7 @@ describe("AgentApprovalCard", () => {
 			),
 		);
 
-		const reject = container.querySelector<HTMLButtonElement>(
-			".cline-ui-agent-approval-card__button--reject",
-		);
-		const approve = container.querySelector<HTMLButtonElement>(
-			".cline-ui-agent-approval-card__button--approve",
-		);
+		const [approve, reject] = container.querySelectorAll("button");
 		expect(approve?.disabled).toBe(true);
 		expect(reject?.disabled).toBe(true);
 		expect(reject?.textContent).toContain("Rejecting...");

@@ -31,7 +31,7 @@ function ImagePlusIcon() {
 	return (
 		<svg
 			aria-hidden="true"
-			className="size-8 text-cline-ui-accent-foreground"
+			className="size-8 text-cline-ui-primary"
 			fill="none"
 			stroke="currentColor"
 			strokeLinecap="round"

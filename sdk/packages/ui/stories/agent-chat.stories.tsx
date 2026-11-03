@@ -1,5 +1,4 @@
 import type { Meta } from "@storybook/react-vite";
-import type { SVGProps } from "react";
 import {
 	Conversation,
 	ConversationContent,
@@ -59,10 +58,9 @@ function EditIcon() {
 	return <span aria-hidden="true">✎</span>;
 }
 
-function CopyIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
+function CopyIcon() {
 	return (
 		<svg
-			className={className}
 			aria-hidden="true"
 			fill="none"
 			stroke="currentColor"
@@ -70,7 +68,6 @@ function CopyIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
 			strokeLinejoin="round"
 			strokeWidth="2"
 			viewBox="0 0 24 24"
-			{...props}
 		>
 			<rect height="14" rx="2" ry="2" width="14" x="8" y="8" />
 			<path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
@@ -78,10 +75,9 @@ function CopyIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
 	);
 }
 
-function PencilIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
+function PencilIcon() {
 	return (
 		<svg
-			className={className}
 			aria-hidden="true"
 			fill="none"
 			stroke="currentColor"
@@ -89,7 +85,6 @@ function PencilIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
 			strokeLinejoin="round"
 			strokeWidth="2"
 			viewBox="0 0 24 24"
-			{...props}
 		>
 			<path d="M12 20h9" />
 			<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
@@ -97,10 +92,9 @@ function PencilIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
 	);
 }
 
-function UndoIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
+function UndoIcon() {
 	return (
 		<svg
-			className={className}
 			aria-hidden="true"
 			fill="none"
 			stroke="currentColor"
@@ -108,7 +102,6 @@ function UndoIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
 			strokeLinejoin="round"
 			strokeWidth="2"
 			viewBox="0 0 24 24"
-			{...props}
 		>
 			<path d="M9 14 4 9l5-5" />
 			<path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
@@ -116,18 +109,17 @@ function UndoIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
 	);
 }
 
-function ForkIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
+function ForkIcon() {
 	return (
 		<svg
 			aria-hidden="true"
-			className={`rotate-90 ${className ?? ""}`}
+			className="rotate-90"
 			fill="none"
 			stroke="currentColor"
 			strokeLinecap="round"
 			strokeLinejoin="round"
 			strokeWidth="2"
 			viewBox="0 0 24 24"
-			{...props}
 		>
 			<path d="M16 3h5v5" />
 			<path d="M8 3H3v5" />
@@ -170,21 +162,18 @@ export const CompleteConversation = () => (
 				Can you find the settings screen and align it with our shared theme?
 			</MessageContent>
 			<MessageActions side="end">
+				<MessageAction label="Copy user message" title="Copy message">
+					<CopyIcon />
+				</MessageAction>
 				<MessageAction
-					icon={CopyIcon}
-					label="Copy user message"
-					title="Copy message"
-				/>
-				<MessageAction
-					icon={PencilIcon}
 					label="Edit user message"
 					title="Edit message and restart from this point"
-				/>
-				<MessageAction
-					icon={UndoIcon}
-					label="Restore checkpoint"
-					title="Restore checkpoint"
-				/>
+				>
+					<PencilIcon />
+				</MessageAction>
+				<MessageAction label="Restore checkpoint" title="Restore checkpoint">
+					<UndoIcon />
+				</MessageAction>
 				<MessageTimestamp>11:18 AM</MessageTimestamp>
 			</MessageActions>
 		</Message>
@@ -242,16 +231,15 @@ export const CompleteConversation = () => (
 				</ul>
 			</MessageContent>
 			<MessageActions side="start">
+				<MessageAction label="Copy assistant message" title="Copy response">
+					<CopyIcon />
+				</MessageAction>
 				<MessageAction
-					icon={CopyIcon}
-					label="Copy assistant message"
-					title="Copy response"
-				/>
-				<MessageAction
-					icon={ForkIcon}
 					label="Fork session"
 					title="Fork session - copy full message history into a new session"
-				/>
+				>
+					<ForkIcon />
+				</MessageAction>
 				<MessageTimestamp>11:18 AM</MessageTimestamp>
 			</MessageActions>
 		</Message>
@@ -672,7 +660,9 @@ export const DisabledControls = () => (
 		<Message from="assistant">
 			<MessageContent>Actions stay readable when unavailable.</MessageContent>
 			<MessageActions visible>
-				<MessageAction icon={CopyIcon} disabled label="Copy message" />
+				<MessageAction disabled label="Copy message">
+					<CopyIcon />
+				</MessageAction>
 			</MessageActions>
 			<Reasoning>
 				<ReasoningTrigger disabled />

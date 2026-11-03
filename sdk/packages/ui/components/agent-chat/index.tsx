@@ -17,7 +17,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { type ButtonIcon, IconButton } from "../button.js";
+import { IconButton } from "../button.js";
 import {
 	DisclosureContent,
 	type DisclosureContentPresentation,
@@ -430,7 +430,6 @@ export type MessageActionProps = Omit<
 	ButtonHTMLAttributes<HTMLButtonElement>,
 	"type"
 > & {
-	icon?: ButtonIcon;
 	label: string;
 };
 
