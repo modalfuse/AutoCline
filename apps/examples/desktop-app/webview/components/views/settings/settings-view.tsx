@@ -56,7 +56,8 @@ import {
 } from "../marketplace-explorer-view";
 import { PageFrame, PageHeader } from "../page-layout";
 import { AboutContent } from "./about-view";
-import { AccountView } from "./account-view";
+// AutoCline: AccountView removed (Cline credits/billing not applicable)
+// import { AccountView } from "./account-view";
 import { AddProviderContent, type AddProviderPayload } from "./add-provider";
 import { ChannelsContent } from "./channels-view";
 import { CustomizeView } from "./customize-view";
@@ -651,8 +652,6 @@ export function SettingsView({
 			<ImportContent />
 		) : activeNav === "Remote" ? (
 			<RemoteEnvironmentsContent />
-		) : activeNav === "Account" ? (
-			<AccountView />
 		) : activeNav === "About" ? (
 			<AboutContent onOpenConnectors={() => onNavigateSection("Customize")} />
 		) : activeNav === "General" ? (
