@@ -43,7 +43,7 @@ const colorClasses = {
 
 const surfaceClasses = {
 	neutral: "border-(--neutral-a4) bg-(--neutral-a2)",
-	accent: "border-cline-ui-accent-border bg-cline-ui-accent",
+	accent: "border-(--accent-a4) bg-cline-ui-accent",
 	info: "border-cline-ui-info-border bg-cline-ui-info-surface",
 	success: "border-cline-ui-success-border bg-cline-ui-success-surface",
 	warning: "border-cline-ui-warning-border bg-cline-ui-warning-surface",
@@ -60,7 +60,7 @@ const sizeClasses = {
 // utilities behind the hover-capable media query.
 const hoverClasses = {
 	neutral: "hover:bg-(--neutral-3)",
-	accent: "hover:bg-cline-ui-accent-hover",
+	accent: "hover:bg-(--accent-4)",
 	info: "hover:bg-[color-mix(in_srgb,var(--info-surface),var(--info-text)_6%)]",
 	success:
 		"hover:bg-[color-mix(in_srgb,var(--success-surface),var(--success-text)_6%)]",

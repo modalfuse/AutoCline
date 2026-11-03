@@ -39,9 +39,6 @@ const visualRoleTokens = [
 	"border-1",
 	"border-2",
 	"focus-ring",
-	"neutral-solid",
-	"neutral-contrast",
-	"neutral-solid-hover",
 ];
 
 const statusRoleTokens = ["success", "warning", "error", "info"].flatMap(
@@ -67,8 +64,6 @@ const semanticTokens = [
 	"muted-foreground",
 	"accent",
 	"accent-foreground",
-	"accent-hover",
-	"accent-border",
 	"destructive",
 	"destructive-foreground",
 	"border",
@@ -408,11 +403,6 @@ describe("@cline/ui theme contract", () => {
 		expect(shared).toContain("--accent-foreground: var(--accent-11);");
 		expect(shared).toContain("--secondary: var(--surface-3);");
 		expect(shared).toContain("--secondary-foreground: var(--text-1);");
-		expect(shared).toContain("--neutral-solid: var(--neutral-12);");
-		expect(shared).toContain("--neutral-contrast: var(--neutral-1);");
-		expect(shared).toMatch(
-			/--neutral-solid-hover:\s*color-mix\(\s*in srgb,\s*var\(--neutral-solid\) 90%,\s*var\(--neutral-contrast\)\s*\);/,
-		);
 		expect(shared).toContain("--ring: var(--focus-ring);");
 		expect(shared).toContain("--destructive: var(--error-solid);");
 		for (const status of ["success", "warning", "error", "info"]) {
@@ -428,7 +418,7 @@ describe("@cline/ui theme contract", () => {
 		const palette = block(read("palette.css"), selector);
 		const solid = paletteRgb(palette, "neutral-12");
 		const contrast = paletteRgb(palette, "neutral-1");
-		// The role contract above fixes this to an opaque 90%/10% sRGB mix.
+		// Neutral controls use the existing palette endpoints and a 90%/10% hover mix.
 		const hover = solid.map(
 			(value, index) => value * 0.9 + contrast[index] * 0.1,
 		);
@@ -538,13 +528,6 @@ describe("@cline/ui theme contract", () => {
 		expect(rules.map((rule) => declarations(rule.body))).toEqual(
 			globalRules.map((rule) => declarations(rule.body)),
 		);
-		for (const token of [
-			"neutral-solid",
-			"neutral-contrast",
-			"neutral-solid-hover",
-		]) {
-			expect(scoped).toContain(`--${token}:`);
-		}
 	});
 
 	it("provides Tailwind mappings without registering raw palette steps", () => {

@@ -164,26 +164,26 @@
 	.cline-ui-switch-neutral
 		.cline-ui-switch__input:enabled:checked
 		+ .cline-ui-switch__track {
-		background: var(--neutral-solid);
+		background: var(--neutral-12);
 	}
 
 	.cline-ui-switch-neutral
 		.cline-ui-switch__input:enabled:checked:hover
 		+ .cline-ui-switch__track {
-		background: var(--neutral-solid-hover);
+		background: color-mix(in srgb, var(--neutral-12) 90%, var(--neutral-1));
 	}
 
 	.cline-ui-switch-neutral
 		.cline-ui-switch__input:enabled:checked:active
 		+ .cline-ui-switch__track {
-		background: var(--neutral-solid);
+		background: var(--neutral-12);
 	}
 
 	.cline-ui-switch-neutral
 		.cline-ui-switch__input:enabled:checked
 		+ .cline-ui-switch__track
 		.cline-ui-switch__thumb {
-		background: var(--neutral-contrast);
+		background: var(--neutral-1);
 	}
 
 	:is(.dark .cline-ui-switch-neutral, .cline-ui-switch-neutral.dark)
@@ -191,7 +191,7 @@
 		+ .cline-ui-switch__track
 		.cline-ui-switch__thumb {
 		/* Match the dark thumb to give it the same visual weight on the light track. */
-		box-shadow: 0 0 0 1px var(--neutral-contrast);
+		box-shadow: 0 0 0 1px var(--neutral-1);
 	}
 
 	.cline-ui-switch__input:focus-visible + .cline-ui-switch__track {

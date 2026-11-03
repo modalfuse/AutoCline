@@ -153,8 +153,8 @@
 	}
 
 	.cline-ui-button-primary.cline-ui-button-neutral {
-		background-color: var(--neutral-solid);
-		color: var(--neutral-contrast);
+		background-color: var(--neutral-12);
+		color: var(--neutral-1);
 	}
 
 	:where(.dark) .cline-ui-button-primary.cline-ui-button-neutral,
@@ -176,7 +176,7 @@
 	.cline-ui-button-secondary.cline-ui-button-accent {
 		background-color: var(--accent);
 		color: var(--accent-foreground);
-		box-shadow: 0 0 0 1px var(--accent-border);
+		box-shadow: 0 0 0 1px var(--accent-a4);
 	}
 
 	.cline-ui-button-secondary.cline-ui-button-neutral {
@@ -209,7 +209,11 @@
 		}
 
 		.cline-ui-button-primary.cline-ui-button-neutral:hover {
-			background-color: var(--neutral-solid-hover);
+			background-color: color-mix(
+				in srgb,
+				var(--neutral-12) 90%,
+				var(--neutral-1)
+			);
 		}
 
 		.cline-ui-button-primary.cline-ui-button-destructive:hover {
@@ -217,7 +221,7 @@
 		}
 
 		.cline-ui-button-secondary.cline-ui-button-accent:hover {
-			background-color: var(--accent-hover);
+			background-color: var(--accent-4);
 		}
 
 		.cline-ui-button-secondary.cline-ui-button-neutral:hover {
