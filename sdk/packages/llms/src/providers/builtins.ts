@@ -887,7 +887,7 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		family: "openai-compatible",
 		popular: 40,
 		capabilities: ["prompt-cache"],
-		defaultModelId: "gpt-5.4",
+		defaultModelId: "deepseek-chat",
 		apiKeyEnv: ["LITELLM_API_KEY"],
 		defaults: { baseUrl: "http://localhost:4000/v1" },
 		metadata: { apiKeyOptional: true },

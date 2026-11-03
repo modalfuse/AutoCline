@@ -574,6 +574,43 @@ async function describeLiteLlmHttpFailure(response: Response): Promise<string> {
 	return `HTTP ${response.status}${bodyText}`;
 }
 
+
+const LITELLM_VENDOR_LABELS: Record<string, string> = {
+	deepseek: "DeepSeek",
+	dashscope: "DashScope",
+	openai: "OpenAI",
+	anthropic: "Anthropic",
+	google: "Google",
+	gemini: "Gemini",
+	ollama: "Ollama",
+	qwen: "Qwen",
+	moonshot: "Moonshot",
+	zhipu: "Zhipu",
+	glm: "GLM",
+};
+
+/** Map LiteLLM upstream ids (vendor/model) to picker labels 厂商-模型. */
+export function formatLiteLlmVendorModelLabel(
+	upstreamModelId: string | undefined,
+	fallbackName: string,
+): string {
+	const upstream = upstreamModelId?.trim();
+	if (!upstream) return fallbackName;
+	const slash = upstream.indexOf("/");
+	if (slash <= 0 || slash === upstream.length - 1) {
+		return upstream;
+	}
+	const vendorRaw = upstream.slice(0, slash);
+	const modelRaw = upstream.slice(slash + 1);
+	const vendorKey = vendorRaw.toLowerCase();
+	const vendor =
+		LITELLM_VENDOR_LABELS[vendorKey] ??
+		(vendorRaw.length === 0
+			? vendorRaw
+			: vendorRaw.charAt(0).toUpperCase() + vendorRaw.slice(1));
+	return `${vendor}-${modelRaw}`;
+}
+
 async function fetchLiteLlmPrivateModels(
 	config: ProviderConfig,
 	token: string,
@@ -603,29 +640,27 @@ async function fetchLiteLlmPrivateModels(
 					const entries = payload?.data ?? [];
 					const models: Record<string, ModelInfo> = {};
 					for (const model of entries) {
-						const displayName = model.model_name?.trim();
-						const actualModelId = model.litellm_params?.model?.trim();
-						const modelId = actualModelId || displayName;
+						// Router calls must use model_name; do not also index the
+						// underlying litellm_params.model or the picker doubles every row.
+						const routeName = model.model_name?.trim();
+						const upstreamModelId = model.litellm_params?.model?.trim();
+						const modelId = routeName || upstreamModelId;
 						if (!modelId) {
 							continue;
 						}
 						const info = model.model_info;
-						const converted = buildModelFromPrivateSource(modelId, {
-							name: displayName ?? modelId,
+						const label = formatLiteLlmVendorModelLabel(
+							upstreamModelId,
+							modelId,
+						);
+						models[modelId] = buildModelFromPrivateSource(modelId, {
+							name: label,
 							maxTokens: info?.max_output_tokens ?? info?.max_tokens,
 							maxInputTokens: info?.max_input_tokens ?? info?.max_tokens,
 							supportsImages: info?.supports_vision,
 							supportsPromptCache: info?.supports_prompt_caching,
 							supportsReasoning: info?.supports_reasoning,
 						});
-						models[modelId] = converted;
-						if (displayName) {
-							models[displayName] = {
-								...converted,
-								id: displayName,
-								name: displayName,
-							};
-						}
 					}
 					return models;
 				}

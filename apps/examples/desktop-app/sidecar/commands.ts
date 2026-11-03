@@ -2356,7 +2356,9 @@ export async function handleCommand(
 				)
 				.catch(() => undefined);
 		};
-		await swr.refresh;
+		// Warm/stale cache must return immediately; Hub refresh continues in
+		// the background and republishes via onRefreshed / remote_session_messages_refreshed.
+		void swr.refresh.catch(() => false);
 		return await readSessionMessages(
 			ctx,
 			sessionId,
@@ -3192,7 +3194,15 @@ export async function handleCommand(
 	// ── Provider management ────────────────────────────────────────────
 	if (command === "list_provider_catalog") {
 		const providers = createHubProvidersApi(await ensureSharedHubClient(ctx));
-		return await providers.list({ isClinePassEnabled: true });
+		// AutoCline: hide Cline Usage-Billing + ClinePass from Settings and composer.
+		const catalog = await providers.list({ isClinePassEnabled: false });
+		const hidden = new Set(["cline", "cline-pass"]);
+		return {
+			...catalog,
+			providers: (catalog.providers ?? []).filter(
+				(provider: { id?: string }) => !hidden.has(String(provider.id ?? "")),
+			),
+		};
 	}
 	if (command === "list_transcription_models") {
 		const manager = new ProviderSettingsManager();

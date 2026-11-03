@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	clearLiveModelsCatalogCache,
 	clearPrivateModelsCatalogCache,
+	formatLiteLlmVendorModelLabel,
 	getLiveModelsCatalog,
 	isPrivateModelCatalogProvider,
 	resolveProviderConfig,
@@ -31,6 +32,24 @@ describe("isPrivateModelCatalogProvider", () => {
 		"anthropic",
 	])("does not classify %s as endpoint-specific", (providerId) => {
 		expect(isPrivateModelCatalogProvider(providerId)).toBe(false);
+	});
+});
+
+describe("formatLiteLlmVendorModelLabel", () => {
+	it("formats vendor/model upstream ids as 厂商-模型", () => {
+		expect(formatLiteLlmVendorModelLabel("deepseek/deepseek-chat", "x")).toBe(
+			"DeepSeek-deepseek-chat",
+		);
+		expect(formatLiteLlmVendorModelLabel("dashscope/qwen-flash", "x")).toBe(
+			"DashScope-qwen-flash",
+		);
+	});
+
+	it("falls back when upstream is missing", () => {
+		expect(formatLiteLlmVendorModelLabel(undefined, "deepseek-chat")).toBe(
+			"deepseek-chat",
+		);
+		expect(formatLiteLlmVendorModelLabel("solo", "fallback")).toBe("solo");
 	});
 });
 
@@ -753,24 +772,17 @@ describe("resolveProviderConfig", () => {
 			"http://localhost:4000/v1/model/info",
 			"http://localhost:4000/model/info",
 		]);
-		expect(resolved?.knownModels?.["openai/gpt-4o-mini"]).toEqual(
-			expect.objectContaining({
-				name: "private-proxy-model",
-				maxTokens: 64_000,
-				maxInputTokens: 500_000,
-				capabilities: expect.arrayContaining(["images", "reasoning"]),
-			}),
-		);
+		// Route by model_name only; label from litellm_params.model (厂商-模型).
+		expect(resolved?.knownModels?.["openai/gpt-4o-mini"]).toBeUndefined();
 		expect(resolved?.knownModels?.["private-proxy-model"]).toEqual(
 			expect.objectContaining({
-				name: "private-proxy-model",
+				name: "OpenAI-gpt-4o-mini",
 				maxTokens: 64_000,
 				maxInputTokens: 500_000,
 				capabilities: expect.arrayContaining(["images", "reasoning"]),
 			}),
 		);
 		expect(Object.keys(resolved?.knownModels ?? {}).sort()).toEqual([
-			"openai/gpt-4o-mini",
 			"private-proxy-model",
 		]);
 		expect(resolved?.knownModels?.["gpt-5.4"]).toBeUndefined();

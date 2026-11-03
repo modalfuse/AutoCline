@@ -106,10 +106,16 @@ export function selectTranscriptionModel(
 		: null;
 }
 
+/** AutoCline: keep Cline cloud billing providers out of BYOK + composer pickers. */
+const AUTOCLINE_HIDDEN_PROVIDER_IDS = new Set(["cline", "cline-pass"]);
+
 export function buildProviderModelCatalog(
 	providers: Provider[],
 	voiceInput?: VoiceInputSelection,
 ): ProviderModelCatalog {
+	providers = providers.filter(
+		(provider) => !AUTOCLINE_HIDDEN_PROVIDER_IDS.has(provider.id),
+	);
 	const providerEntries = providers.map((provider) => {
 		const chatModels = filterChatModels(provider.modelList);
 		return {
@@ -339,8 +345,7 @@ export async function loadProviderModelCatalog(options?: {
 		// the account-scoped cloud response determines which models are offered.
 		return buildProviderModelCatalog(
 			Object.entries({
-				cline: "Cline Usage-Billing",
-				"cline-pass": "ClinePass",
+				// AutoCline: omit Cline Usage-Billing / ClinePass even for cloud catalogs.
 				"cline-cloud": "ClineFree",
 			}).map(([id, name]) => ({
 				id,
