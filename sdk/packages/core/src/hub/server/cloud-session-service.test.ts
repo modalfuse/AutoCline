@@ -4,7 +4,6 @@ import { join } from "node:path";
 import type { HubEventEnvelope } from "@cline/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClineAccountService } from "../../account";
-import { getProviderAuthHandler } from "../../auth/provider-auth-registry";
 import { CloudSessionError } from "../../cloud/api";
 import type { CloudSessionController } from "../../cloud/controller";
 import {
@@ -1154,15 +1153,15 @@ describe("hub cloud credentials", () => {
 			settings = ProviderSettingsSchemaTyped.parse(next);
 			return emptyStoredProviderSettings();
 		});
-		const handler = getProviderAuthHandler("cline");
+		const service = new HubCloudSessionService({ publish: () => {} });
+		services.push(service);
+		const handler = service["clineAuthHandler"];
 		if (!handler) throw new Error("Missing Cline auth handler");
 		vi.spyOn(handler, "refresh").mockResolvedValue({
 			access: "new-access",
 			refresh: "new-refresh",
 			expires: Date.now() + 3600000,
 		});
-		const service = new HubCloudSessionService({ publish: () => {} });
-		services.push(service);
 		service.watch();
 		const controller = service["controller"]!;
 		const dispose = vi.spyOn(controller, "dispose");

@@ -678,7 +678,6 @@ export class CronRunner {
 		spec: CronSpecRecord,
 		workspaceRoot: string,
 		mode: "act" | "plan" | "yolo",
-		provider: string,
 	): Promise<string> {
 		const notes = buildNotesSystemPromptSection(spec.notesDirectory);
 		const additional = mergeRulesForSystemPrompt(undefined, notes);
@@ -690,7 +689,6 @@ export class CronRunner {
 			metadata,
 			rules: spec.systemPrompt ? undefined : additional,
 			mode,
-			providerId: provider,
 			overridePrompt: spec.systemPrompt,
 			platform:
 				(typeof process !== "undefined" && process?.platform) || "unknown",
@@ -734,12 +732,7 @@ export class CronRunner {
 			model,
 			mode,
 			source: spec.source?.trim() || "user",
-			systemPrompt: await this.buildSystemPrompt(
-				spec,
-				workspaceRoot,
-				mode,
-				provider,
-			),
+			systemPrompt: await this.buildSystemPrompt(spec, workspaceRoot, mode),
 			maxIterations: spec.maxIterations,
 			enableTools: runtimeOptions?.enableTools ?? true,
 			enableSpawn: runtimeOptions?.enableSpawn ?? true,

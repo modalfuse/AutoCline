@@ -7,45 +7,36 @@ vi.mock("../../../utils/local-cli", () => ({
 
 import {
 	canContinueLocalCliSetup,
-	getMainMenuOptions,
 	getOAuthProviderLabel,
+	MAIN_MENU,
 	resolveProviderSetupRoute,
-	shouldUseFeaturedClineModelPicker,
 	toModelEntriesFromKnownModels,
 	toModelEntry,
 	toProviderEntry,
 } from "./model";
 
 describe("onboarding model helpers", () => {
-	it("hides ClinePass from the main menu unless its feature flag is enabled", () => {
-		expect(
-			getMainMenuOptions().some((option) => option.value === "cline-pass"),
-		).toBe(false);
-		expect(
-			getMainMenuOptions({ isClinePassEnabled: false }).some(
-				(option) => option.value === "cline-pass",
-			),
-		).toBe(false);
-		expect(
-			getMainMenuOptions({ isClinePassEnabled: true }).some(
-				(option) => option.value === "cline-pass",
-			),
-		).toBe(true);
+	it("offers only non-Cline sign-in paths in the main menu", () => {
+		const values = MAIN_MENU.map((option) => option.value);
+		expect(values).not.toContain("cline");
+		expect(values).not.toContain("cline-pass");
+		expect(values).toContain("openai-codex");
+		expect(values).toContain("byo");
 	});
 
 	it("maps provider catalog entries into onboarding provider entries", () => {
 		expect(
 			toProviderEntry({
-				id: "cline",
-				name: "Cline",
+				id: "openai-codex",
+				name: "ChatGPT",
 				apiKey: "",
 				oauthAccessTokenPresent: true,
 				models: 12,
 				defaultModelId: "openai/gpt-5.3-codex",
 			}),
 		).toEqual({
-			id: "cline",
-			name: "Cline",
+			id: "openai-codex",
+			name: "ChatGPT",
 			isOAuth: true,
 			isLocalAuth: false,
 			hasAuth: true,
@@ -176,16 +167,8 @@ describe("onboarding model helpers", () => {
 	});
 
 	it("formats OAuth provider labels for onboarding status views", () => {
-		expect(getOAuthProviderLabel("cline")).toBe("Cline");
-		expect(getOAuthProviderLabel("cline-pass")).toBe("ClinePass");
 		expect(getOAuthProviderLabel("openai-codex")).toBe("ChatGPT");
 		expect(getOAuthProviderLabel("oca")).toBe("oca");
-	});
-
-	it("uses the featured Cline model picker for the Cline and ClinePass providers", () => {
-		expect(shouldUseFeaturedClineModelPicker("cline")).toBe(true);
-		expect(shouldUseFeaturedClineModelPicker("cline-pass")).toBe(true);
-		expect(shouldUseFeaturedClineModelPicker("anthropic")).toBe(false);
 	});
 });
 

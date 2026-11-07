@@ -164,13 +164,6 @@ export function transformRemoteConfigToStateShape(remoteConfig: RemoteConfig): P
 		}
 	}
 
-	const clineSettings = remoteConfig.providerSettings?.Cline
-	if (clineSettings) {
-		transformed.planModeApiProvider = "cline"
-		transformed.actModeApiProvider = "cline"
-		providers.push("cline")
-	}
-
 	// Map LiteLLM provider settings
 	const liteLlmSettings = remoteConfig.providerSettings?.LiteLLM
 	if (liteLlmSettings) {

@@ -1,6 +1,4 @@
-import { CORE_BUILD_VERSION } from "@cline/core"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { version as extensionVersion } from "../../package.json"
 import { buildSdkProviderConfig } from "./sdk-api-handler"
 
 const mocks = vi.hoisted(() => {
@@ -45,7 +43,7 @@ describe("buildSdkProviderConfig", () => {
 		const providerConfig = buildSdkProviderConfig(
 			{
 				actModeApiProvider: "cline-pass",
-				actModeClinePassModelId: "cline-pass/glm-5.2",
+				actModeApiModelId: "cline-pass/glm-5.2",
 			},
 			"act",
 		)
@@ -106,7 +104,10 @@ describe("buildSdkProviderConfig", () => {
 		})
 	})
 
-	it("attaches the Cline surface headers for Cline billing providers", () => {
+	it("does not attach Cline surface headers to the removed cline provider", () => {
+		// `cline` was removed from the provider surface; a legacy ApiConfiguration
+		// that still names it must not gain the Cline billing surface identity
+		// headers (and must not borrow the stored token) through this path.
 		mocks.providerSettingsManager.getProviderSettings.mockReturnValue({
 			provider: "cline",
 			apiKey: "cline-token",
@@ -129,21 +130,18 @@ describe("buildSdkProviderConfig", () => {
 			},
 		)
 
-		expect(providerConfig.headers).toMatchObject({
-			"HTTP-Referer": "https://cline.bot",
-			"X-Title": "Cline",
-			"User-Agent": "Cline/4.1.16",
-			"X-IS-MULTIROOT": "false",
-			"X-CLIENT-TYPE": "VSCode Extension",
-			"X-CLIENT-VERSION": "4.1.16",
-			"X-PLATFORM": "Visual Studio Code",
-			"X-PLATFORM-VERSION": "1.109.0",
-		})
-		// A standalone handler is not a task, so no task id is claimed.
-		expect(providerConfig.headers && "X-Task-ID" in providerConfig.headers).toBe(false)
+		const headers = providerConfig.headers ?? {}
+		expect(headers["HTTP-Referer"]).toBeUndefined()
+		expect(headers["X-Title"]).toBeUndefined()
+		expect(headers["User-Agent"]).toBeUndefined()
+		expect(headers["X-CLIENT-TYPE"]).toBeUndefined()
+		expect(headers["X-CLIENT-VERSION"]).toBeUndefined()
+		expect(headers["X-PLATFORM"]).toBeUndefined()
+		expect(headers["X-PLATFORM-VERSION"]).toBeUndefined()
+		expect("X-Task-ID" in headers).toBe(false)
 	})
 
-	it("attaches the Cline surface headers for ClinePass", () => {
+	it("does not attach Cline surface headers to the removed cline-pass provider", () => {
 		mocks.providerSettingsManager.getProviderSettings.mockReturnValue({
 			provider: "cline",
 			auth: { accessToken: "workos:shared-cline-token" },
@@ -157,13 +155,13 @@ describe("buildSdkProviderConfig", () => {
 			"act",
 		)
 
-		// Without a resolved host context the extension's own identity is used.
-		expect(providerConfig.headers).toMatchObject({
-			"X-CLIENT-TYPE": "VSCode Extension",
-			"X-CLIENT-VERSION": extensionVersion,
-			"X-CORE-VERSION": CORE_BUILD_VERSION,
-			"User-Agent": `Cline/${extensionVersion}`,
-		})
+		// The extension's own identity must not be auto-attached for a provider
+		// that no longer exists on the billing surface.
+		const headers = providerConfig.headers ?? {}
+		expect(headers["X-CLIENT-TYPE"]).toBeUndefined()
+		expect(headers["X-CLIENT-VERSION"]).toBeUndefined()
+		expect(headers["X-CORE-VERSION"]).toBeUndefined()
+		expect(headers["User-Agent"]).toBeUndefined()
 	})
 
 	it("does not attach Cline surface headers to other providers, but keeps their stored headers", () => {

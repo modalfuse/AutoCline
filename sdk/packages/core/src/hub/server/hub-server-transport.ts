@@ -937,7 +937,6 @@ export class HubServerTransport implements NativeHubTransport {
 		switch (envelope.command) {
 			case "providers.list":
 			case "providers.models.list":
-			case "providers.models.recommended":
 				return await handleProviderCommand(envelope);
 			case "providers.settings.save":
 			case "providers.add":

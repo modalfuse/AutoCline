@@ -140,6 +140,8 @@ vi.mock("@cline/core", async () => ({
 // the credential round-trip tests exercise this store.
 const mockProviderSettings = new Map<string, Record<string, unknown>>()
 let mockLastUsedProvider: string | undefined
+const mockLastSaveOptions: Array<{ tokenSource?: string; setLastUsed?: boolean }> = []
+const mockLastSaveSettings: Array<Record<string, unknown>> = []
 vi.mock("./provider-migration", () => ({
 	getProviderSettingsManager: () => ({
 		getProviderSettings: (provider: string) => mockProviderSettings.get(provider),
@@ -147,6 +149,8 @@ vi.mock("./provider-migration", () => ({
 		saveProviderSettings: (settings: Record<string, unknown>, options?: { setLastUsed?: boolean }) => {
 			const provider = settings.provider as string
 			mockProviderSettings.set(provider, { ...settings })
+			mockLastSaveOptions.push({ ...(options ?? {}) })
+			mockLastSaveSettings.push({ ...settings })
 			if (options?.setLastUsed !== false) {
 				mockLastUsedProvider = provider
 			}
@@ -246,6 +250,8 @@ describe("AuthService", () => {
 		mockGlobalState.clear()
 		mockProviderSettings.clear()
 		mockLastUsedProvider = undefined
+		mockLastSaveOptions.length = 0
+		mockLastSaveSettings.length = 0
 		vi.clearAllMocks()
 	})
 
@@ -632,7 +638,38 @@ describe("AuthService", () => {
 			expect(mockLastUsedProvider).toBe("cline-pass")
 		})
 
-		it("claims the last-used slot on restore when no cline-backed provider is selected", async () => {
+		it("never moves lastUsedProvider away from a non-cline provider on restore (#13501 follow-up)", async () => {
+			// Regression: a token refresh / startup restore used to rewrite
+			// lastUsedProvider to "cline" whenever the current selection was
+			// not backed by the cline credential entry — so a user who picked
+			// LiteLLM silently got switched back to Cline on restart.
+			mockLastUsedProvider = "litellm"
+			mockProviderSettings.set("cline", {
+				provider: "cline",
+				auth: {
+					accessToken: "workos:persisted-access-token",
+					refreshToken: "persisted-refresh-token",
+					accountId: "user-123",
+				},
+			})
+			vi.mocked(getValidClineCredentials).mockResolvedValue({
+				access: "refreshed-access-token",
+				refresh: "refreshed-refresh-token",
+				expires: Date.now() + 3600 * 1000,
+				accountId: "user-123",
+				email: "test@example.com",
+			})
+
+			await authService.restoreRefreshTokenAndRetrieveAuthInfo()
+
+			expect(testAccess(authService)._authenticated).toBe(true)
+			expect(mockLastUsedProvider).toBe("litellm")
+			// The credential itself is still written (and refreshed).
+			expect(mockProviderSettings.get("cline")?.auth).toBeDefined()
+			expect(mockLastSaveOptions.at(-1)).toEqual({ tokenSource: "oauth", setLastUsed: false })
+		})
+
+		it("does not claim the last-used slot on restore when no provider was ever selected", async () => {
 			mockLastUsedProvider = undefined
 			mockProviderSettings.set("cline", {
 				provider: "cline",
@@ -652,7 +689,9 @@ describe("AuthService", () => {
 
 			await authService.restoreRefreshTokenAndRetrieveAuthInfo()
 
-			expect(mockLastUsedProvider).toBe("cline")
+			// Writing Cline credentials is not a provider selection: lastUsed
+			// stays unset (session resolution falls back to its own default).
+			expect(mockLastUsedProvider).toBeUndefined()
 		})
 
 		it("sets unauthenticated state when providers.json has no Cline auth", async () => {

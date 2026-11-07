@@ -76,7 +76,6 @@ export interface ExtensionStateContextType extends ExtensionState {
 	mcpTab?: McpViewTab
 	showSettings: boolean
 	settingsNavigationRequest?: SettingsNavigationRequest
-	settingsInitialModelTab?: "recommended" | "free"
 	showHistory: boolean
 	showAccount: boolean
 	showWorktrees: boolean
@@ -125,10 +124,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	navigateToMarketplace: () => void
 	navigateToMcp: (tab?: McpViewTab) => void
 	navigateToSettings: (targetSection?: SettingsNavigationTarget) => void
-	navigateToSettingsModelPicker: (opts: {
-		targetSection?: SettingsNavigationTarget
-		initialModelTab?: "recommended" | "free"
-	}) => void
+	navigateToSettingsModelPicker: (opts: { targetSection?: SettingsNavigationTarget }) => void
 	navigateToHistory: () => void
 	navigateToAccount: () => void
 	navigateToWorktrees: () => void
@@ -157,7 +153,6 @@ export const ExtensionStateContextProvider: React.FC<{
 	const [mcpTab, setMcpTab] = useState<McpViewTab | undefined>(undefined)
 	const [showSettings, setShowSettings] = useState(false)
 	const [settingsNavigationRequest, setSettingsNavigationRequest] = useState<SettingsNavigationRequest | undefined>(undefined)
-	const [settingsInitialModelTab, setSettingsInitialModelTab] = useState<"recommended" | "free" | undefined>(undefined)
 	const [showHistory, setShowHistory] = useState(false)
 	const [showAccount, setShowAccount] = useState(false)
 	const [showWorktrees, setShowWorktrees] = useState(false)
@@ -216,21 +211,19 @@ export const ExtensionStateContextProvider: React.FC<{
 			setShowAccount(false)
 			setShowWorktrees(false)
 			setSettingsNavigationRequest(targetSection ? createSettingsNavigationRequest(targetSection) : undefined)
-			setSettingsInitialModelTab(undefined)
 			setShowSettings(true)
 		},
 		[closeMarketplaceView, closeMcpView],
 	)
 
 	const navigateToSettingsModelPicker = useCallback(
-		(opts: { targetSection?: SettingsNavigationTarget; initialModelTab?: "recommended" | "free" }) => {
+		(opts: { targetSection?: SettingsNavigationTarget }) => {
 			closeMarketplaceView()
 			setShowHistory(false)
 			closeMcpView()
 			setShowAccount(false)
 			setShowWorktrees(false)
 			setSettingsNavigationRequest(opts.targetSection ? createSettingsNavigationRequest(opts.targetSection) : undefined)
-			setSettingsInitialModelTab(opts.initialModelTab)
 			setShowSettings(true)
 		},
 		[closeMarketplaceView, closeMcpView],
@@ -873,7 +866,6 @@ export const ExtensionStateContextProvider: React.FC<{
 		mcpTab,
 		showSettings,
 		settingsNavigationRequest,
-		settingsInitialModelTab,
 		showHistory,
 		showAccount,
 		showWorktrees,

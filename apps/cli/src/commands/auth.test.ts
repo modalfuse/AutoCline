@@ -43,12 +43,12 @@ describe("saveOAuthProviderSettings", () => {
 
 		const merged = saveOAuthProviderSettings(
 			manager,
-			"cline",
+			"openai-codex",
 			{
-				provider: "cline",
+				provider: "openai-codex",
 				apiKey: "manual-key",
 				auth: {
-					accessToken: "workos:old-access",
+					accessToken: "old-access",
 					refreshToken: "old-refresh",
 					accountId: "acct-old",
 				},
@@ -62,10 +62,10 @@ describe("saveOAuthProviderSettings", () => {
 		);
 
 		expect(merged).toMatchObject({
-			provider: "cline",
+			provider: "openai-codex",
 			apiKey: "manual-key",
 			auth: {
-				accessToken: "workos:new-access",
+				accessToken: "new-access",
 				refreshToken: "new-refresh",
 				accountId: "acct-new",
 				expiresAt: 4_000_000_000_000,
@@ -73,14 +73,35 @@ describe("saveOAuthProviderSettings", () => {
 		});
 		expect(save).toHaveBeenCalledWith(
 			expect.objectContaining({
-				provider: "cline",
+				provider: "openai-codex",
 				apiKey: "manual-key",
 				auth: expect.objectContaining({
-					accessToken: "workos:new-access",
+					accessToken: "new-access",
 				}),
 			}),
 			{ tokenSource: "oauth" },
 		);
+	});
+
+	it("rejects removed providers that no longer support OAuth credentials", () => {
+		const save = vi.fn();
+		const manager = {
+			saveProviderSettings: save,
+		} as unknown as ProviderSettingsManager;
+
+		expect(() =>
+			saveOAuthProviderSettings(
+				manager,
+				"cline",
+				{ provider: "cline", apiKey: "manual-key" },
+				{
+					access: "new-access",
+					refresh: "new-refresh",
+					expires: 4_000_000_000_000,
+				},
+			),
+		).toThrow('Provider "cline" does not support OAuth credentials');
+		expect(save).not.toHaveBeenCalled();
 	});
 });
 

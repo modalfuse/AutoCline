@@ -101,9 +101,7 @@ export async function handleDesktopCommand(
 ): Promise<unknown> {
 	if (command === "list_provider_catalog") {
 		await ensureCustomProvidersLoaded(providerSettingsManager);
-		return await listLocalProviders(providerSettingsManager, {
-			isClinePassEnabled: true,
-		});
+		return await listLocalProviders(providerSettingsManager);
 	}
 	if (command === "list_provider_models") {
 		const provider = String(args?.provider ?? "").trim();

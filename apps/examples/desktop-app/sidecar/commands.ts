@@ -3207,7 +3207,7 @@ export async function handleCommand(
 	if (command === "list_provider_catalog") {
 		const providers = createHubProvidersApi(await ensureSharedHubClient(ctx));
 		// AutoCline: hide Cline Usage-Billing + ClinePass from Settings and composer.
-		const catalog = await providers.list({ isClinePassEnabled: false });
+		const catalog = await providers.list();
 		const hidden = new Set(["cline", "cline-pass"]);
 		return {
 			...catalog,
@@ -3235,11 +3235,6 @@ export async function handleCommand(
 		return await providers.listModels({
 			providerId,
 		});
-	}
-	if (command === "list_cline_recommended_models") {
-		return await createHubProvidersApi(
-			await ensureSharedHubClient(ctx),
-		).recommendedModels();
 	}
 	if (command === "create_streaming_transcription_session") {
 		const manager = new ProviderSettingsManager();

@@ -48,7 +48,6 @@ import {
 	useState,
 } from "react";
 import { AppUpdateIndicator } from "@/components/app-update-indicator";
-import { ClineLogo } from "@/components/cline-logo";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -209,6 +208,17 @@ function SettingsSectionNavigation({
 	// Voice input only works with a connected model provider, so its section
 	// stays disabled until one is set up (null = catalog still loading).
 	const hasConnectedProvider = useHasConnectedProvider();
+	// Clicking the Provider row navigates (via onSelect) *and* expands the
+	// group immediately, so the sub-pages appear even before the parent
+	// re-renders with the new active section. The parent's active section
+	// still wins whenever it is a provider section.
+	const [providerGroupExpanded, setProviderGroupExpanded] = useState(false);
+	const activeProviderGroupOpen = isProviderSection(activeSection);
+	useEffect(() => {
+		if (activeProviderGroupOpen) {
+			setProviderGroupExpanded(true);
+		}
+	}, [activeProviderGroupOpen]);
 	const renderSectionButton = (section: SettingsSection) => {
 		const Icon = SETTINGS_SECTION_ICONS[section];
 		const label = settingsSectionLabel(section);
@@ -252,7 +262,7 @@ function SettingsSectionNavigation({
 	};
 
 	const renderProvidersGroup = () => {
-		const open = isProviderSection(activeSection);
+		const open = activeProviderGroupOpen || providerGroupExpanded;
 		return (
 			<Fragment key="providers">
 				<Button
@@ -260,36 +270,49 @@ function SettingsSectionNavigation({
 					className={cn(
 						"min-w-0 justify-start",
 						open && "bg-surface-hover-lighter text-sidebar-foreground",
+						collapsed && "size-9 justify-center px-0",
 					)}
-					onClick={() => onSelect(readProviderSectionInUse())}
+					onClick={() => {
+						setProviderGroupExpanded(true);
+						onSelect(readProviderSectionInUse());
+					}}
 					title="Provider"
 					type="button"
 					variant="sidebarItem"
 				>
 					<Plug className="size-4 shrink-0" />
-					<span className="truncate">Provider</span>
+					{!collapsed ? <span className="truncate">Provider</span> : null}
 				</Button>
 				{open
-					? PROVIDER_SECTIONS.map((section) => (
-							<Button
-								aria-current={activeSection === section ? "page" : undefined}
-								aria-label={PROVIDER_SECTION_LABELS[section]}
-								className={cn(
-									"min-w-0 justify-start pl-8!",
-									activeSection === section &&
-										"bg-surface-hover text-sidebar-foreground",
-								)}
-								key={section}
-								onClick={() => onSelect(section)}
-								title={PROVIDER_SECTION_LABELS[section]}
-								type="button"
-								variant="sidebarItem"
-							>
-								<span className="truncate">
-									{PROVIDER_SECTION_LABELS[section]}
-								</span>
-							</Button>
-						))
+					? PROVIDER_SECTIONS.map((section) => {
+							const Icon = SETTINGS_SECTION_ICONS[section];
+							return (
+								<Button
+									aria-current={activeSection === section ? "page" : undefined}
+									aria-label={PROVIDER_SECTION_LABELS[section]}
+									className={cn(
+										"min-w-0 justify-start",
+										collapsed ? "size-9 justify-center px-0" : "pl-8!",
+										activeSection === section &&
+											"bg-surface-hover text-sidebar-foreground",
+									)}
+									key={section}
+									onClick={() => onSelect(section)}
+									title={PROVIDER_SECTION_LABELS[section]}
+									type="button"
+									variant="sidebarItem"
+								>
+									{/* Sub-pages render as icon-only rows in the collapsed rail. */}
+									{collapsed ? (
+										<Icon className="size-4 shrink-0" />
+									) : (
+										<span className="truncate">
+											{PROVIDER_SECTION_LABELS[section]}
+										</span>
+									)}
+								</Button>
+							);
+						})
 					: null}
 			</Fragment>
 		);
@@ -316,10 +339,15 @@ function SettingsSectionNavigation({
 			{SETTINGS_SECTIONS.filter(
 				(section) => collapsed || section !== "Schedules",
 			).map((section) => {
-				if (collapsed || !isProviderSection(section)) {
+				if (!isProviderSection(section)) {
 					return renderSectionButton(section);
 				}
-				return section === "Account" ? renderProvidersGroup() : null;
+				// The provider sub-pages are rendered as one "Provider" group,
+				// anchored on the first provider section. They are no longer
+				// emitted from the (removed) Account section.
+				return section === PROVIDER_SECTIONS[0]
+					? renderProvidersGroup()
+					: null;
 			})}
 			{collapsed ? (
 				<>
@@ -370,7 +398,7 @@ export function AgentSidebar({
 	const { user, activeOrganization } = useAccount();
 	const { displayName, email } = user || {};
 	const username = displayName?.split(" ")?.[0] || email?.split("@")?.[0];
-	const accountName = username?.trim() || "Cline Desktop";
+	const accountName = username?.trim() || "AutoCline Desktop";
 	const accountScope = user
 		? (activeOrganization?.name ?? "Personal")
 		: undefined;
@@ -463,7 +491,7 @@ export function AgentSidebar({
 				error:
 					error instanceof Error
 						? error.message
-						: "Unable to read Cline Hub status.",
+						: "Unable to read AutoCline Hub status.",
 				url: null,
 			});
 		}
@@ -918,7 +946,7 @@ export function AgentSidebar({
 						>
 							<HoverCardTrigger asChild>
 								<button
-									aria-label="Cline home"
+									aria-label="AutoCline home"
 									className={cn(
 										"flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
 										isCollapsed && "size-9",
@@ -927,7 +955,22 @@ export function AgentSidebar({
 									title="Home"
 									type="button"
 								>
-									<ClineLogo className="size-5" />
+									{/*
+									 * AutoCline filled brand mark (head + headset + chat bubble).
+									 * Plain <img> on purpose: no CSS mask, so the fills/colors show.
+									 * Uses the transparent-background export — the source art is
+									 * drawn on white, which otherwise renders as a white tile.
+									 * The line-art variant is tray-only — do not use it here.
+									 * The art is near-black, so dark mode inverts it to stay legible
+									 * on the dark sidebar (its blue bubble hue survives the flip).
+									 */}
+									<img
+										alt=""
+										aria-hidden="true"
+										className="size-6 shrink-0 select-none object-contain dark:invert"
+										draggable={false}
+										src="/autocline-brand-icon-transparent.png"
+									/>
 								</button>
 							</HoverCardTrigger>
 							<HoverCardContent
@@ -959,12 +1002,12 @@ export function AgentSidebar({
 											)}
 										/>
 										<span className="font-medium">
-											Cline Hub @{hubPort(hubStatus?.url ?? null) ?? "unknown"}
+											AutoCline Hub @{hubPort(hubStatus?.url ?? null) ?? "unknown"}
 										</span>
 									</div>
 									{hubStatus && !hubStatus.connected && (
 										<p className="mt-1 text-[11px] text-destructive">
-											{hubStatus.error ?? "Cline Hub is not connected."}
+											{hubStatus.error ?? "AutoCline Hub is not connected."}
 										</p>
 									)}
 								</div>
@@ -1042,7 +1085,7 @@ export function AgentSidebar({
 									"bg-surface-hover-lighter text-sidebar-foreground",
 							)}
 							onClick={() => openSettingsSection("Customize")}
-							title="Customize Cline with plugins, rules, and more"
+							title="Customize AutoCline with plugins, rules, and more"
 							type="button"
 							variant="sidebarItem"
 						>

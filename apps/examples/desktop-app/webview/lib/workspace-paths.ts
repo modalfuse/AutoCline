@@ -136,7 +136,13 @@ export function isExcludedWorkspacePath(path: string): boolean {
 	if (isChatWorkspacePath(normalized)) {
 		return true;
 	}
-	if (normalized.split(/[\\/]/).includes(".cline")) {
+	if (
+		normalized
+			.split(/[\\/]/)
+			.some(
+				(segment) => segment === ".cline" || segment === ".autocline",
+			)
+	) {
 		return true;
 	}
 	return (

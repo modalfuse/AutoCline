@@ -5,12 +5,14 @@ import { modelSupportsImageInput } from "@cline/shared";
 export const CLOUD_COMPUTER_USE_ENV = "CLINE_CLOUD_COMPUTER_USE";
 
 /**
- * Screenshots only help a model that can see them. Models missing from the
- * bundled catalog are treated as text-only so the section never reaches a
- * model whose `read_files` would reject images.
+ * Screenshots only help a model that can see them. Cloud model IDs are
+ * canonical OpenRouter model IDs, so resolve them against the retained
+ * OpenRouter metadata in the bundled catalog. Models missing from that
+ * metadata are treated as text-only so the section never reaches a model
+ * whose `read_files` would reject images.
  */
 export function cloudModelSupportsImages(modelId: string): boolean {
-	const info = MODEL_COLLECTIONS_BY_PROVIDER_ID.cline?.models?.[modelId];
+	const info = MODEL_COLLECTIONS_BY_PROVIDER_ID.openrouter?.models?.[modelId];
 	return info ? modelSupportsImageInput(info) : false;
 }
 

@@ -8,22 +8,16 @@ export * as Llms from "@cline/llms";
 export {
 	buildClineClientHeaders,
 	ClineFreeModelLimitError,
-	ClineNotSubscribedError,
 	ClineOrgIndividualInferenceSubscriptionError,
-	ClinePassLimitError,
 	extractClineFreeModelLimitResetTime,
 	extractClinePassLimitMessage,
-	getClineNotSubscribedMessage,
 	getClineOrgIndividualInferenceSubscriptionMessage,
-	getClinePassSubscriptionUrl,
 	isClineFreeModelLimitError,
 	isClineFreeModelLimitMessage,
 	isClineModelNotFoundMessage,
-	isClineNotSubscribedError,
 	isClineNotSubscribedMessage,
 	isClineOrgIndividualInferenceSubscriptionError,
 	isClineOrgIndividualInferenceSubscriptionMessage,
-	isClinePassLimitError,
 	isClinePassLimitMessage,
 } from "@cline/llms";
 // Shared contracts and path helpers re-exported for app consumers.
@@ -157,6 +151,10 @@ export {
 	refreshClineToken,
 	startClineDeviceAuth,
 } from "./auth/cline";
+export {
+	CLINE_ACCOUNT_PROVIDER_ID,
+	createClineAccountAuthHandler,
+} from "./auth/cline-account";
 export {
 	getValidOpenAICodexCredentials,
 	loginOpenAICodex,
@@ -1062,17 +1060,6 @@ export { createHubProvidersApi } from "./hub/client/providers";
 export * from "./remote/remote-environments";
 export { ensureLoginShellPath } from "./remote/shell-path";
 export { isClineAccountFeatureEnabled } from "./services/feature-flags/cline-account-feature-flags";
-export {
-	applyClineFeaturedModels,
-	type ClineRecommendedModel,
-	type ClineRecommendedModelsData,
-	FALLBACK_CLINE_RECOMMENDED_MODELS,
-	type FetchClineRecommendedModelsOptions,
-	fetchClineRecommendedModels,
-	getCachedClineRecommendedModels,
-	peekClineRecommendedModels,
-	resetClineRecommendedModelsCacheForTests,
-} from "./services/llms/cline-recommended-models";
 export {
 	clearLiveModelsCatalogCache,
 	clearPrivateModelsCatalogCache,

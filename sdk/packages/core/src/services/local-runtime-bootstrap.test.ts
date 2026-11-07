@@ -267,11 +267,41 @@ describe("prepareLocalRuntimeBootstrap", () => {
 			writeSessionMetadata: async () => {},
 		});
 
-		expect(bootstrap.providerConfig.modelCatalog).toMatchObject({
-			loadLatestOnInit: false,
-			loadPrivateOnAuth: false,
+			expect(bootstrap.providerConfig.modelCatalog).toMatchObject({
+				loadLatestOnInit: false,
+				loadPrivateOnAuth: false,
+			});
 		});
-	});
+
+	it("falls back to hub model catalog defaults when no stored settings exist", async () => {
+			const { prepareLocalRuntimeBootstrap } = await import(
+				"./local-runtime-bootstrap"
+			);
+
+			const bootstrap = await prepareLocalRuntimeBootstrap({
+				input: createStartInput(),
+				localRuntime: {
+					modelCatalogDefaults: {
+						loadLatestOnInit: true,
+						loadPrivateOnAuth: true,
+					},
+				},
+				sessionId: "sess-1",
+				providerSettingsManager: createProviderSettingsManager() as never,
+				defaultTelemetry: undefined,
+				defaultToolPolicies: undefined,
+				onPluginEvent: () => {},
+				onTeamEvent: () => {},
+				createSpawnTool,
+				readSessionMetadata: async () => undefined,
+				writeSessionMetadata: async () => {},
+			});
+
+			expect(bootstrap.providerConfig.modelCatalog).toMatchObject({
+				loadLatestOnInit: true,
+				loadPrivateOnAuth: true,
+			});
+		});
 
 	it.each([
 		{ label: "missing", systemPrompt: undefined },
@@ -876,81 +906,96 @@ describe("prepareLocalRuntimeBootstrap", () => {
 	it.each([
 		"cline",
 		"cline-pass",
-	])("adds required source request headers for %s", async (providerId) => {
-		const { prepareLocalRuntimeBootstrap } = await import(
-			"./local-runtime-bootstrap"
-		);
+	])(
+		"does not synthesize Cline source headers for removed provider %s",
+		async (providerId) => {
+			const { prepareLocalRuntimeBootstrap } = await import(
+				"./local-runtime-bootstrap"
+			);
 
-		const input = createStartInput();
-		input.config.providerId = providerId;
-		input.config.modelId =
-			providerId === "cline-pass"
-				? "cline-pass/test-model"
-				: "anthropic/claude-haiku-4.5";
-		const config = input.config as typeof input.config & {
-			headers: Record<string, string>;
-			providerConfig: {
-				providerId: string;
+			const input = createStartInput();
+			input.config.providerId = providerId;
+			input.config.modelId =
+				providerId === "cline-pass"
+					? "cline-pass/test-model"
+					: "anthropic/claude-haiku-4.5";
+			const config = input.config as typeof input.config & {
 				headers: Record<string, string>;
+				providerConfig: {
+					providerId: string;
+					headers: Record<string, string>;
+				};
 			};
-		};
-		config.headers = {
-			"X-CLIENT-TYPE": "config-client",
-			"X-Task-ID": "config-task",
-			"x-config": "config",
-			"x-shared": "config-wins",
-		};
-		config.providerConfig = {
-			providerId,
-			headers: {
+			config.headers = {
+				"X-CLIENT-TYPE": "config-client",
+				"X-Task-ID": "config-task",
+				"x-config": "config",
+				"x-shared": "config-wins",
+			};
+			config.providerConfig = {
+				providerId,
+				headers: {
+					"X-CLIENT-VERSION": "provider-config-version",
+					"x-provider-config": "provider-config",
+				},
+			};
+
+			const bootstrap = await prepareLocalRuntimeBootstrap({
+				input,
+				localRuntime: {
+					extensionContext: {
+						client: { name: "cline-cli", version: "3.0.38" },
+					},
+				},
+				sessionId: "sess-cline-headers",
+				providerSettingsManager: createProviderSettingsManager({
+					provider: providerId,
+					model: input.config.modelId,
+					headers: {
+						"X-CLIENT-TYPE": "stored-client",
+						"x-stored": "stored",
+						"x-shared": "stored-loses",
+					},
+				}) as never,
+				defaultTelemetry: undefined,
+				defaultToolPolicies: undefined,
+				onPluginEvent: () => {},
+				onTeamEvent: () => {},
+				createSpawnTool,
+				readSessionMetadata: async () => undefined,
+				writeSessionMetadata: async () => {},
+			});
+
+			// `cline` / `cline-pass` are no longer supported providers, so no
+			// Cline billing/attribution headers are synthesized for them. Only the
+			// explicit session-level provider headers survive.
+			expect(bootstrap.providerConfig.headers).toMatchObject({
 				"X-CLIENT-VERSION": "provider-config-version",
 				"x-provider-config": "provider-config",
-			},
-		};
-
-		const bootstrap = await prepareLocalRuntimeBootstrap({
-			input,
-			localRuntime: {
-				extensionContext: {
-					client: { name: "cline-cli", version: "3.0.38" },
-				},
-			},
-			sessionId: "sess-cline-headers",
-			providerSettingsManager: createProviderSettingsManager({
-				provider: providerId,
-				model: input.config.modelId,
-				headers: {
-					"X-CLIENT-TYPE": "stored-client",
-					"x-stored": "stored",
-					"x-shared": "stored-loses",
-				},
-			}) as never,
-			defaultTelemetry: undefined,
-			defaultToolPolicies: undefined,
-			onPluginEvent: () => {},
-			onTeamEvent: () => {},
-			createSpawnTool,
-			readSessionMetadata: async () => undefined,
-			writeSessionMetadata: async () => {},
-		});
-
-		expect(bootstrap.providerConfig.headers).toMatchObject({
-			"HTTP-Referer": "https://cline.bot",
-			"X-Title": "Cline",
-			"User-Agent": "Cline/3.0.38",
-			"X-IS-MULTIROOT": "false",
-			"X-CLIENT-TYPE": "cline-cli",
-			"X-CLIENT-VERSION": "3.0.38",
-			"X-PLATFORM": "cli",
-			"X-PLATFORM-VERSION": "3.0.38",
-			"X-CORE-VERSION": corePackageVersion,
-			"X-Task-ID": "sess-cline-headers",
-			"x-config": "config",
-			"x-provider-config": "provider-config",
-			"x-shared": "config-wins",
-			"x-stored": "stored",
-		});
-	});
+			});
+			// Header isolation contract: stored + config header layers are not
+			// forwarded for these providers, and no Cline source headers appear.
+			const headers = bootstrap.providerConfig.headers ?? {};
+			expect(headers["x-config"]).toBeUndefined();
+			expect(headers["x-shared"]).toBeUndefined();
+			expect(headers["x-stored"]).toBeUndefined();
+			expect(headers["X-CLIENT-TYPE"]).toBeUndefined();
+			expect(headers["X-Task-ID"]).toBeUndefined();
+			expect(headers["HTTP-Referer"]).toBeUndefined();
+			expect(headers["X-Title"]).toBeUndefined();
+			expect(headers["User-Agent"]).toBeUndefined();
+			expect(headers["X-IS-MULTIROOT"]).toBeUndefined();
+			expect(headers["X-PLATFORM"]).toBeUndefined();
+			expect(headers["X-PLATFORM-VERSION"]).toBeUndefined();
+			expect(headers["X-CORE-VERSION"]).toBeUndefined();
+			// Client identity metadata is still recovered from config headers even
+			// though it is no longer forwarded as a request header.
+			expect(bootstrap.config.extensionContext?.client).toEqual({
+				name: "cline-cli",
+				version: "3.0.38",
+			});
+		},
+	);
 
 	it("rebuilds extensionContext.client from hub-baked request headers", async () => {
 		const { prepareLocalRuntimeBootstrap } = await import(
@@ -983,8 +1028,20 @@ describe("prepareLocalRuntimeBootstrap", () => {
 			name: "cline-cli",
 			version: "3.0.38",
 		});
-		expect(bootstrap.providerConfig.headers).toMatchObject({
-			"User-Agent": "Cline/3.0.38",
+		// The removed `cline` provider no longer receives automatically
+		// synthesized billing/attribution request headers.
+		const headers = bootstrap.providerConfig.headers ?? {};
+		expect(headers["User-Agent"]).toBeUndefined();
+		expect(headers["HTTP-Referer"]).toBeUndefined();
+		expect(headers["X-Title"]).toBeUndefined();
+		expect(headers["X-IS-MULTIROOT"]).toBeUndefined();
+		expect(headers["X-PLATFORM"]).toBeUndefined();
+		expect(headers["X-PLATFORM-VERSION"]).toBeUndefined();
+		expect(headers["X-CORE-VERSION"]).toBeUndefined();
+		expect(headers["X-Task-ID"]).toBeUndefined();
+		// The hub-baked request headers are explicit user-supplied values and are
+		// forwarded verbatim; they are not synthesized by this bootstrap.
+		expect(bootstrap.providerConfig.headers).toEqual({
 			"X-CLIENT-TYPE": "cline-cli",
 			"X-CLIENT-VERSION": "3.0.38",
 		});
@@ -1028,7 +1085,7 @@ describe("prepareLocalRuntimeBootstrap", () => {
 		});
 	});
 
-	it("uses host request headers for Cline providers on core sessions", async () => {
+	it("forwards host request headers for a supported provider on core sessions", async () => {
 		const { prepareLocalRuntimeBootstrap } = await import(
 			"./local-runtime-bootstrap"
 		);
@@ -1037,6 +1094,8 @@ describe("prepareLocalRuntimeBootstrap", () => {
 			...createStartInput(),
 			source: "core" as const,
 		};
+		input.config.providerId = "anthropic";
+		input.config.modelId = "claude-sonnet-4-5";
 		const config = input.config as typeof input.config & {
 			headers: Record<string, string>;
 		};
@@ -1057,7 +1116,7 @@ describe("prepareLocalRuntimeBootstrap", () => {
 			},
 			sessionId: "sess-non-cli",
 			providerSettingsManager: createProviderSettingsManager({
-				provider: "cline",
+				provider: "anthropic",
 				model: input.config.modelId,
 				headers: {
 					"x-stored": "stored",
@@ -1072,19 +1131,35 @@ describe("prepareLocalRuntimeBootstrap", () => {
 			writeSessionMetadata: async () => {},
 		});
 
-		expect(bootstrap.providerConfig.headers).toMatchObject({
-			"HTTP-Referer": "https://cline.bot",
-			"X-Title": "Cline",
-			"User-Agent": "Cline/9.9.9",
-			"X-IS-MULTIROOT": "true",
-			"X-CLIENT-TYPE": "VSCode Extension",
-			"X-CLIENT-VERSION": "9.9.9",
-			"X-PLATFORM": "Visual Studio Code",
-			"X-PLATFORM-VERSION": "1.103.0",
-			"X-CORE-VERSION": corePackageVersion,
-			"X-Task-ID": "sess-non-cli",
+		// Supported providers get neutral forwarding of the explicit config header
+		// layer; no Cline source/attribution headers are injected.
+		expect(bootstrap.providerConfig.headers).toEqual({
 			"x-config": "config",
-			"x-stored": "stored",
+		});
+		expect(bootstrap.providerConfig.headers?.["x-stored"]).toBeUndefined();
+		expect(bootstrap.providerConfig.headers?.["HTTP-Referer"]).toBeUndefined();
+		expect(bootstrap.providerConfig.headers?.["X-Title"]).toBeUndefined();
+		expect(bootstrap.providerConfig.headers?.["User-Agent"]).toBeUndefined();
+		expect(bootstrap.providerConfig.headers?.["X-IS-MULTIROOT"]).toBeUndefined();
+		expect(bootstrap.providerConfig.headers?.["X-CLIENT-TYPE"]).toBeUndefined();
+		expect(
+			bootstrap.providerConfig.headers?.["X-CLIENT-VERSION"],
+		).toBeUndefined();
+		expect(bootstrap.providerConfig.headers?.["X-PLATFORM"]).toBeUndefined();
+		expect(
+			bootstrap.providerConfig.headers?.["X-PLATFORM-VERSION"],
+		).toBeUndefined();
+		expect(
+			bootstrap.providerConfig.headers?.["X-CORE-VERSION"],
+		).toBeUndefined();
+		expect(bootstrap.providerConfig.headers?.["X-Task-ID"]).toBeUndefined();
+		// Host client identity is preserved as neutral metadata, not as headers.
+		expect(bootstrap.config.extensionContext?.client).toEqual({
+			name: "VSCode Extension",
+			version: "9.9.9",
+			platform: "Visual Studio Code",
+			platformVersion: "1.103.0",
+			isMultiRoot: true,
 		});
 	});
 

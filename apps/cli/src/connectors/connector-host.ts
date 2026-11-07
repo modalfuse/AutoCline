@@ -654,7 +654,6 @@ export async function handleConnectorUserTurn<
 				const systemPrompt = await resolveSystemPrompt({
 					cwd: next.cwd,
 					explicitSystemPrompt: input.explicitSystemPrompt,
-					providerId: input.baseStartRequest.provider,
 					rules: input.systemRules,
 				});
 				const nextState = {

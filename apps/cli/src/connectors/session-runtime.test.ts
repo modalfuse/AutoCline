@@ -103,9 +103,9 @@ describe("buildConnectorStartRequest", () => {
 		expect(request.provider).toBe("openrouter");
 		expect(request.apiKey).toBe("env-openrouter-key");
 		expect(request.model).toBe("anthropic/claude-sonnet-4.6");
-		expect(mockGetLastUsedProviderSettings).toHaveBeenCalledWith({
-			isClinePassEnabled: true,
-		});
+		// ClinePass was removed, so the last-used provider is read without the
+		// former subscription-only lookup option.
+		expect(mockGetLastUsedProviderSettings).toHaveBeenCalledWith(undefined);
 	});
 
 	it("uses auth material resolved by provider settings manager", async () => {

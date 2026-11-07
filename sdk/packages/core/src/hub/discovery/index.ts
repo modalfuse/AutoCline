@@ -645,12 +645,31 @@ export async function probeHubServer(
 	}
 }
 
+/**
+ * Serializes a host for use in a URL authority.
+ *
+ * Raw IPv6 literals contain colons, which the URL parser reads as the port
+ * separator (`ws://::1:25463/hub` is an invalid URL), so they must be wrapped
+ * in brackets. Hosts that are already bracketed are passed through unchanged
+ * to avoid double-bracketing. IPv4 addresses and DNS names are returned as-is.
+ */
+function serializeUrlHost(host: string): string {
+	if (host.startsWith("[") && host.endsWith("]")) {
+		return host;
+	}
+	// An unbracketed IPv6 literal is the only host shape containing a colon.
+	if (host.includes(":")) {
+		return `[${host}]`;
+	}
+	return host;
+}
+
 export function createHubServerUrl(
 	host: string,
 	port: number,
 	pathname = "/hub",
 ): string {
-	return new URL(`ws://${host}:${port}${pathname}`).toString();
+	return new URL(`ws://${serializeUrlHost(host)}:${port}${pathname}`).toString();
 }
 
 export function toHubHealthUrl(wsUrl: string): string {

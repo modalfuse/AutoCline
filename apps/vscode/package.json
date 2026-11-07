@@ -404,15 +404,6 @@
 		"storybook": "cd webview-ui && bun run storybook",
 		"eval:smoke:run": "bun evals/smoke-tests/run-smoke-tests.ts"
 	},
-	"lint-staged": {
-		"src/shared/storage/state-keys.ts": [
-			"node scripts/generate-state-proto.mjs",
-			"git add apps/vscode/proto/cline/state.proto"
-		],
-		"*": [
-			"biome check --write --staged --no-errors-on-unmatched --files-ignore-unknown=true --semicolons=as-needed"
-		]
-	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.14",
 		"@bufbuild/buf": "^1.54.0",

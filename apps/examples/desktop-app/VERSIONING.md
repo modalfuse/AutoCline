@@ -98,5 +98,7 @@ This generates:
 - `src-tauri/icons/icon.ico` (Windows)
 - `src-tauri/icons/*.png` (various sizes)
 
+菜单栏托盘模板：`src-tauri/icons/tray/cline-template.png`，由品牌图生成黑白剪影（原图保留为 `cline-template.original.png`）。
+
 **Note**: The runtime icon switching system (`syncAppIcon`) is disabled for AutoCline.
 The Dock/taskbar icon is always the custom brand icon baked into the native bundle.

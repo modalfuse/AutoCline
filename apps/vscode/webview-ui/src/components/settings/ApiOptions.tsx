@@ -8,7 +8,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { PLATFORM_CONFIG, PlatformType } from "@/config/platform.config"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useProviderListings } from "@/hooks/useProviderListings"
-import { ClinePassHint } from "./ClinePassHint"
 import { OPENROUTER_MODEL_PICKER_Z_INDEX } from "./OpenRouterModelPicker"
 import { AIhubmixProvider } from "./providers/AihubmixProvider"
 import { AnthropicProvider } from "./providers/AnthropicProvider"
@@ -16,8 +15,6 @@ import { AskSageProvider } from "./providers/AskSageProvider"
 import { BasetenProvider } from "./providers/BasetenProvider"
 import { BedrockProvider } from "./providers/BedrockProvider"
 import { ClaudeCodeProvider } from "./providers/ClaudeCodeProvider"
-import { ClinePassProvider } from "./providers/ClinePassProvider"
-import { ClineProvider } from "./providers/ClineProvider"
 import { DifyProvider } from "./providers/DifyProvider"
 import { GenericProviderSettings } from "./providers/GenericProviderSettings"
 import { GroqProvider } from "./providers/GroqProvider"
@@ -55,7 +52,6 @@ interface ApiOptionsProps {
 	modelIdErrorMessage?: string
 	isPopup?: boolean
 	currentMode: Mode
-	initialModelTab?: "recommended" | "free"
 }
 
 // This is necessary to ensure dropdown opens downward, important for when this is used in popup
@@ -82,14 +78,7 @@ declare module "vscode" {
 	}
 }
 
-const ApiOptions = ({
-	showModelOptions,
-	apiErrorMessage,
-	modelIdErrorMessage,
-	isPopup,
-	currentMode,
-	initialModelTab,
-}: ApiOptionsProps) => {
+const ApiOptions = ({ showModelOptions, apiErrorMessage, modelIdErrorMessage, isPopup, currentMode }: ApiOptionsProps) => {
 	// Use full context state for immediate save payload
 	const { apiConfiguration, remoteConfigSettings } = useExtensionState()
 
@@ -349,23 +338,8 @@ const ApiOptions = ({
 				</ProviderDropdownWrapper>
 			</DropdownContainer>
 
-			{!isPopup && <ClinePassHint currentMode={currentMode} selectedProvider={selectedProvider} />}
-
 			{apiConfiguration && selectedProvider === "hicap" && (
 				<HicapProvider currentMode={currentMode} isPopup={isPopup} showModelOptions={showModelOptions} />
-			)}
-
-			{apiConfiguration && selectedProvider === "cline" && (
-				<ClineProvider
-					currentMode={currentMode}
-					initialModelTab={initialModelTab}
-					isPopup={isPopup}
-					showModelOptions={showModelOptions}
-				/>
-			)}
-
-			{apiConfiguration && selectedProvider === "cline-pass" && (
-				<ClinePassProvider currentMode={currentMode} isPopup={isPopup} showModelOptions={showModelOptions} />
 			)}
 
 			{apiConfiguration && selectedProvider === "asksage" && (

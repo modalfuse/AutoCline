@@ -1,6 +1,5 @@
 import type { AgentToolContext, HubEventEnvelope } from "@cline/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { version as corePackageVersion } from "../../../package.json";
 import { createSessionCompactionState } from "../../session/models/session-compaction";
 import { SessionSource } from "../../types/common";
 import type { HubTransportContext } from "../server/handlers/context";
@@ -43,8 +42,8 @@ vi.mock("../client", () => ({
 
 function createConfig() {
 	return {
-		providerId: "cline",
-		modelId: "anthropic/claude-haiku-4.5",
+		providerId: "anthropic",
+		modelId: "claude-sonnet-4-5",
 		cwd: "/tmp/project",
 		workspaceRoot: "/tmp/project",
 		systemPrompt: "system",
@@ -103,6 +102,9 @@ describe("HubRuntimeHost", () => {
 		const started = await host.startSession({
 			config: {
 				...createConfig(),
+				providerId: "openai-codex",
+				modelId: "gpt-5.4",
+				apiKey: "oauth-access-token",
 				agentPluginPaths: ["./portable-plugin"],
 			},
 			source: SessionSource.CLI,
@@ -135,8 +137,8 @@ describe("HubRuntimeHost", () => {
 			workspaceRoot: "/tmp/project",
 			cwd: "/tmp/project",
 			sessionConfig: expect.objectContaining({
-				providerId: "cline",
-				modelId: "anthropic/claude-haiku-4.5",
+				providerId: "openai-codex",
+				modelId: "gpt-5.4",
 				cwd: "/tmp/project",
 				workspaceRoot: "/tmp/project",
 				systemPrompt: "system",
@@ -146,17 +148,13 @@ describe("HubRuntimeHost", () => {
 				enableTools: true,
 				enableSpawnAgent: true,
 				enableAgentTeams: true,
+				// `openai-codex` is a supported provider whose required headers are
+				// derived from the OAuth token/session, not from host identity. Only
+				// the Codex-controlled headers are produced for this session.
 				headers: expect.objectContaining({
-					"HTTP-Referer": "https://cline.bot",
-					"X-Title": "Cline",
-					"User-Agent": "Cline/3.0.38",
-					"X-IS-MULTIROOT": "false",
-					"X-CLIENT-TYPE": "cline-cli",
-					"X-CLIENT-VERSION": "3.0.38",
-					"X-PLATFORM": "cli",
-					"X-PLATFORM-VERSION": "3.0.38",
-					"X-CORE-VERSION": corePackageVersion,
-					"X-Task-ID": expect.any(String),
+					originator: "cline",
+					session_id: expect.any(String),
+					"User-Agent": expect.stringMatching(/^Cline\//),
 				}),
 			}),
 			metadata: expect.objectContaining({
@@ -185,6 +183,28 @@ describe("HubRuntimeHost", () => {
 			toolPolicies: undefined,
 			initialMessages: undefined,
 		});
+		// Neutral session-create options are still forwarded verbatim.
+		const createPayload = commandMock.mock.calls[0]?.[1] as {
+			sessionConfig?: { headers?: Record<string, string> };
+		};
+		const sessionHeaders = createPayload.sessionConfig?.headers ?? {};
+		expect(
+			Object.keys(sessionHeaders).filter((name) =>
+				/^x-(client|platform|core|task|is)-/i.test(name) ||
+				name === "HTTP-Referer" ||
+				name === "X-Title",
+			),
+		).toEqual([]);
+		// Session creation must never auto-start a run.
+		expect(
+			commandMock.mock.calls.some(([command]) => command === "run.start"),
+		).toBe(false);
+		expect(commandMock).not.toHaveBeenCalledWith(
+			"run.start",
+			expect.anything(),
+			expect.anything(),
+			expect.anything(),
+		);
 	});
 
 	it("reconstructs tool content updates from hub events", async () => {

@@ -27,7 +27,7 @@ import {
 	MODEL_COLLECTIONS_BY_PROVIDER_ID,
 	OLLAMA_DEFAULT_CONTEXT_WINDOW,
 } from "@cline/llms"
-import { buildClineSystemPrompt, isClineProvider } from "@cline/shared"
+import { buildClineSystemPrompt } from "@cline/shared"
 import type { ApiConfiguration } from "@shared/api"
 import { ClineClient } from "@shared/cline"
 import type { HistoryItem } from "@shared/HistoryItem"
@@ -397,8 +397,6 @@ const PROVIDER_API_KEY_MAP: Record<string, keyof ApiConfiguration> = {
 	vertex: "geminiApiKey",
 	gemini: "geminiApiKey",
 	deepseek: "deepSeekApiKey",
-	cline: "clineApiKey",
-	"cline-pass": "clineApiKey",
 	ollama: "ollamaApiKey",
 	requesty: "requestyApiKey",
 	together: "togetherApiKey",
@@ -446,8 +444,6 @@ const PROVIDER_MODEL_ID_MAP: Record<string, { plan: keyof ApiConfiguration; act:
 	bedrock: { plan: "planModeApiModelId", act: "actModeApiModelId" },
 	vertex: { plan: "planModeApiModelId", act: "actModeApiModelId" },
 	deepseek: { plan: "planModeApiModelId", act: "actModeApiModelId" },
-	cline: { plan: "planModeClineModelId", act: "actModeClineModelId" },
-	"cline-pass": { plan: "planModeClinePassModelId", act: "actModeClinePassModelId" },
 	litellm: { plan: "planModeLiteLlmModelId", act: "actModeLiteLlmModelId" },
 	requesty: { plan: "planModeRequestyModelId", act: "actModeRequestyModelId" },
 	together: { plan: "planModeTogetherModelId", act: "actModeTogetherModelId" },
@@ -517,10 +513,7 @@ export function resolveApiKey(providerId: string, config: ApiConfiguration): str
 			return configuredApiKey
 		}
 
-		// Read from providers.json via the shared ProviderSettingsManager. This is
-		// intentionally keyed by the requested provider so SDK auth metadata can
-		// resolve shared storage (e.g. cline-pass -> cline) without VS Code
-		// hardcoding provider exceptions.
+		// Read from providers.json via the shared ProviderSettingsManager.
 		try {
 			const manager = getProviderSettingsManager()
 			const apiKey = resolveProviderApiKeyFromSettings(manager, providerSettingsProviderId(providerId))?.trim()
@@ -1010,9 +1003,7 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 		try {
 			const dataDir = resolveDataDir()
 			const manager = getProviderSettingsManager(dataDir)
-			const lastUsed = manager.getLastUsedProviderSettings({
-				isClinePassEnabled: true,
-			})
+			const lastUsed = manager.getLastUsedProviderSettings()
 
 			if (lastUsed?.provider && lastUsed?.apiKey) {
 				// providers.json stores SDK provider ids (e.g. `openai-compatible`);
@@ -1062,15 +1053,13 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 			? (resolveOcaReasoningConfig(mode, apiConfig) ?? resolveProviderReasoningConfig(providerId))
 			: resolveProviderReasoningConfig(providerId)
 
-	// Include rich workspace metadata so Cline API observability can extract
-	// git remotes and the latest commit hash from the system message.
+	// Include rich workspace metadata so observability can extract git remotes
+	// and the latest commit hash from the system message.
 	let workspaceMetadata: string | undefined
-	if (isClineProvider(providerId)) {
-		try {
-			workspaceMetadata = await buildWorkspaceMetadata(workspaceRoot)
-		} catch (error) {
-			Logger.warn("[SessionFactory] Failed to build workspace metadata:", error)
-		}
+	try {
+		workspaceMetadata = await buildWorkspaceMetadata(workspaceRoot)
+	} catch (error) {
+		Logger.warn("[SessionFactory] Failed to build workspace metadata:", error)
 	}
 
 	let systemPrompt = ""
@@ -1082,7 +1071,6 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 			workspaceName,
 			metadata: workspaceMetadata,
 			mode: mode === "plan" ? "plan" : "act",
-			providerId,
 			platform: input.runtime?.platform ?? process.platform,
 			// The extension never exposes switch_to_act_mode (unlike the CLI):
 			// matching the legacy extension, the user must flip the Plan/Act

@@ -38,7 +38,7 @@ async function resolveCliBinary(): Promise<string> {
 	if (!compiledCli) {
 		const outfile = join(
 			ensureBuildDir(),
-			process.platform === "win32" ? "cline-cli.exe" : "cline-cli",
+			process.platform === "win32" ? "autocline-cli.exe" : "autocline-cli",
 		);
 		await compileCliBinary({
 			bunTarget:

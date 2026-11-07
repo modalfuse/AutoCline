@@ -1,10 +1,11 @@
 !include "Win\RestartManager.nsh"
 
-; The bundled cline-cli.exe runs the desktop backend and, as a detached
+; The bundled autocline-cli.exe runs the desktop backend and, as a detached
 ; daemon, the Hub, which outlives the desktop. Stop users of every installed
 ; executable before replacing any: stopping only the CLI first leaves the
-; desktop able to spawn it again. code-sidecar.exe is the backend and Hub
-; executable of earlier releases; its Hub may still be running on upgrade.
+; desktop able to spawn it again. cline-cli.exe is the runtime name of earlier
+; AutoCline releases and code-sidecar.exe the backend/Hub executable of the
+; releases before that; either may still be running on upgrade.
 ;
 ; Restart Manager identifies users of the exact files across architectures.
 ; Do not use Get-Process.Path: NSIS is x86 even for an x64 bundle, and x86
@@ -24,6 +25,11 @@
     ${EndIf}
 
     !insertmacro RestartManager_RegisterFile $1 "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${If} $0 != 0
+      Goto end_session
+    ${EndIf}
+
+    !insertmacro RestartManager_RegisterFile $1 "$INSTDIR\autocline-cli.exe"
     ${If} $0 != 0
       Goto end_session
     ${EndIf}
@@ -71,7 +77,8 @@
     Abort
 
   done:
-    ; Nothing installs the earlier backend executable any more.
+    ; Nothing installs the earlier runtime/backend executables any more.
+    Delete "$INSTDIR\cline-cli.exe"
     Delete "$INSTDIR\code-sidecar.exe"
     Pop $4
     Pop $3

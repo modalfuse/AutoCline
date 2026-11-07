@@ -1,6 +1,5 @@
 import axios, { AxiosRequestConfig, AxiosResponse } from "axios"
-import { Controller } from "@/core/controller"
-import { CLINE_PASS_PROVIDER_ID } from "@/core/controller/models/handleClinePassProviderSelection"
+import type { Controller } from "@/core/controller"
 import { ClineAccountService } from "@/services/account/ClineAccountService"
 import { buildBasicClineHeaders } from "@/services/EnvUtils"
 import { getAxiosSettings } from "@/shared/net"
@@ -203,15 +202,6 @@ async function resolveRemoteConfig(organizationId: string, discoveredValue?: str
 	return fetchRemoteConfigForOrganization(organizationId)
 }
 
-function isClinePassSelected(controller: Controller): boolean {
-	const apiConfiguration = controller.stateManager.getApiConfiguration()
-
-	return (
-		apiConfiguration.planModeApiProvider === CLINE_PASS_PROVIDER_ID ||
-		apiConfiguration.actModeApiProvider === CLINE_PASS_PROVIDER_ID
-	)
-}
-
 /**
  * Discovers the target org, resolves its remote config, switches org if needed,
  * fetches API keys, and applies the config. Clears remote config when no
@@ -222,12 +212,6 @@ function isClinePassSelected(controller: Controller): boolean {
  */
 async function ensureUserInOrgWithRemoteConfig(controller: Controller): Promise<RemoteConfig | undefined> {
 	const authService = AuthService.getInstance()
-
-	if (isClinePassSelected(controller)) {
-		await clearRemoteConfig()
-		controller.postStateToWebview()
-		return undefined
-	}
 
 	const discovered = await discoverRemoteConfigOrg()
 

@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
+import { join } from "node:path";
 import { setHubDaemonLauncher, setPluginSandboxLauncher } from "@cline/core";
 import { withHubLauncherIdentity } from "@cline/shared";
+import { resolveClineDataDir } from "@cline/shared/storage";
 import { DESKTOP_CLIENT_CONTEXT } from "./client-context";
 
 /** Absolute path of the Cline CLI binary the desktop shell bundles and launched us with. */
@@ -9,6 +11,43 @@ export const DESKTOP_CLI_PATH_ENV = "CLINE_DESKTOP_CLI_PATH";
 export const DESKTOP_WORKSPACE_ROOT_ENV = "CLINE_DESKTOP_WORKSPACE_ROOT";
 /** Makes a compiled Bun executable run a script instead of its embedded entrypoint. */
 export const BUN_BE_BUN_ENV = "BUN_BE_BUN";
+
+/** Hub loopback port this desktop owns; env knobs below still override it. */
+export const DESKTOP_HUB_PORT_ENV = "CLINE_HUB_PORT";
+export const DESKTOP_HUB_PORT = 25465;
+/** Hub discovery record this desktop owns, so Cline.app's Hub cannot be claimed. */
+export const DESKTOP_HUB_DISCOVERY_PATH_ENV = "CLINE_HUB_DISCOVERY_PATH";
+
+export function resolveDesktopHubDiscoveryPath(
+	env: NodeJS.ProcessEnv = process.env,
+	dataDir = resolveClineDataDir(),
+): string {
+	return (
+		env[DESKTOP_HUB_DISCOVERY_PATH_ENV]?.trim() ||
+		join(dataDir, "locks", "hub", "autocline", "production.json")
+	);
+}
+
+/**
+ * AutoCline runs beside the official Cline desktop app, which owns the shared
+ * production Hub (port 25463 + `~/.cline/locks/hub/production.json`). Pointing
+ * plain `cline hub ensure` at that record would attach this desktop to Cline's
+ * Hub - or, if that Hub is older/newer, replace it under the other app. Stamp
+ * this process's env (the Hub daemon and every CLI child inherit it) with a
+ * desktop-owned port and discovery record instead. Explicit user overrides are
+ * left untouched, and the discovery record itself is still written by the
+ * normal Hub mechanism - nothing is copied or forged here.
+ */
+export function applyDesktopHubDefaults(
+	env: NodeJS.ProcessEnv = process.env,
+): void {
+	if (!env[DESKTOP_HUB_PORT_ENV]?.trim()) {
+		env[DESKTOP_HUB_PORT_ENV] = String(DESKTOP_HUB_PORT);
+	}
+	if (!env[DESKTOP_HUB_DISCOVERY_PATH_ENV]?.trim()) {
+		env[DESKTOP_HUB_DISCOVERY_PATH_ENV] = resolveDesktopHubDiscoveryPath(env);
+	}
+}
 
 export function resolveDesktopCliPath(
 	env: NodeJS.ProcessEnv = process.env,
@@ -54,6 +93,29 @@ export function adoptDesktopCliRuntime(
 
 const HUB_ENSURE_TIMEOUT_MS = 60_000;
 
+/**
+ * Endpoint options the `hub ensure` subcommand documents. The backend's
+ * configured Hub endpoint is inherited as env, but a child CLI that resolves a
+ * different owner default (launcher identity, packaged defaults) would then
+ * probe a different port and discovery record than this backend uses. Passing
+ * the configured values as explicit CLI options makes the endpoint the child's
+ * own input instead of a launcher-dependent default.
+ */
+export function hubEndpointArgs(
+	env: NodeJS.ProcessEnv = process.env,
+): string[] {
+	const args: string[] = [];
+	const port = env[DESKTOP_HUB_PORT_ENV]?.trim();
+	if (port) {
+		args.push("--port", port);
+	}
+	const discoveryPath = env[DESKTOP_HUB_DISCOVERY_PATH_ENV]?.trim();
+	if (discoveryPath) {
+		args.push("--discovery-path", discoveryPath);
+	}
+	return args;
+}
+
 export type RunCliCommand = (
 	command: string,
 	args: string[],
@@ -96,21 +158,29 @@ export async function ensureHubWithDesktopCli(
 	options: { env?: NodeJS.ProcessEnv; run?: RunCliCommand } = {},
 ): Promise<{ url: string }> {
 	const run = options.run ?? runCliCommand;
+	const env = withHubLauncherIdentity(
+		{ ...(options.env ?? process.env), CLINE_NO_AUTO_UPDATE: "1" },
+		{
+			client: DESKTOP_CLIENT_CONTEXT.name,
+			version: DESKTOP_CLIENT_CONTEXT.version,
+			transport: "local",
+		},
+	);
 	const stdout = await run(
 		cliPath,
-		["hub", "ensure", "--json", "--cwd", workspaceRoot],
+		[
+			"hub",
+			"ensure",
+			"--json",
+			"--cwd",
+			workspaceRoot,
+			...hubEndpointArgs(env),
+		],
 		{
 			cwd: workspaceRoot,
 			// The CLI spawns the daemon, so stamp the desktop as its launcher
 			// here or the hub's telemetry would say the CLI started it.
-			env: withHubLauncherIdentity(
-				{ ...(options.env ?? process.env), CLINE_NO_AUTO_UPDATE: "1" },
-				{
-					client: DESKTOP_CLIENT_CONTEXT.name,
-					version: DESKTOP_CLIENT_CONTEXT.version,
-					transport: "local",
-				},
-			),
+			env,
 			timeoutMs: HUB_ENSURE_TIMEOUT_MS,
 		},
 	);

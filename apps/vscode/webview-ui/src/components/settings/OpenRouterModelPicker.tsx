@@ -126,7 +126,7 @@ const OpenRouterModelPicker: React.FC<OpenRouterModelPickerProps> = ({ isPopup, 
 
 	const modelIds = useMemo(() => {
 		const unfilteredModelIds = Object.keys(openRouterModels).sort((a, b) => a.localeCompare(b))
-		return filterOpenRouterModelIds(unfilteredModelIds, "openrouter")
+		return filterOpenRouterModelIds(unfilteredModelIds)
 	}, [openRouterModels])
 
 	const searchableItems = useMemo(() => {

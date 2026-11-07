@@ -13,7 +13,6 @@ import type {
 } from "../catalog/types";
 
 export type ProviderFamily =
-	| "cline"
 	| "openai"
 	| "openai-compatible"
 	| "anthropic"

@@ -62,37 +62,6 @@ describe("SdkTaskControlCoordinator", () => {
 		expect(interactions.resolvePendingAskQuestion("input after cancel")).toBe(false)
 	})
 
-	it("cancels a running Cline task when the user signs out", async () => {
-		const activeSession = makeActiveSession()
-		const { coordinator, options } = makeCoordinator({ activeSession })
-
-		await coordinator.cancelClineTaskOnSignOut(true)
-
-		expect(activeSession.sdkHost.abort).toHaveBeenCalledWith("session-123")
-		expect(options.sessions.setRunning).toHaveBeenCalledWith(false)
-	})
-
-	it("does not cancel a non-Cline task when the user signs out", async () => {
-		const activeSession = makeActiveSession()
-		const { coordinator, options } = makeCoordinator({ activeSession })
-
-		await coordinator.cancelClineTaskOnSignOut(false)
-
-		expect(activeSession.sdkHost.abort).not.toHaveBeenCalled()
-		expect(options.sessions.setRunning).not.toHaveBeenCalled()
-	})
-
-	it("leaves a running cloud host alone on sign-out even without a displayed task", async () => {
-		const activeSession = makeActiveSession()
-		Object.assign(activeSession.sdkHost, { isCloud: true })
-		const { coordinator, options } = makeCoordinator({ activeSession })
-
-		await coordinator.cancelClineTaskOnSignOut(true)
-
-		expect(activeSession.sdkHost.abort).not.toHaveBeenCalled()
-		expect(options.sessions.setRunning).not.toHaveBeenCalled()
-	})
-
 	it("raises the cancel fence BEFORE aborting the session (so stragglers are fenced)", async () => {
 		const activeSession = makeActiveSession()
 		const { coordinator, options } = makeCoordinator({ activeSession })

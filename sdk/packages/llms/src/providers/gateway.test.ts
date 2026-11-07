@@ -250,27 +250,22 @@ async function captureReasoningOptions({
 	providerId,
 	options,
 	defaults,
+	modelId,
 }: {
-	providerId: "cline" | "openrouter";
+	providerId: "openrouter" | "anthropic" | "openai-native";
 	options: Record<string, unknown>;
 	defaults?: GatewayModelHandleOptions;
+	modelId?: string;
 }): Promise<unknown> {
 	mockSuccessfulStream();
-	const isCline = providerId === "cline";
-	const modelId = isCline ? "anthropic/claude-sonnet-4.6" : "openai/gpt-5.4";
+	const resolvedModelId =
+		modelId ?? (providerId === "anthropic" ? "anthropic/claude-sonnet-4.6" : "openai/gpt-5.4");
 	const gateway = createGateway({
 		providerConfigs: [
-			isCline
+			providerId === "openai-native"
 				? {
-						providerId: "cline",
-						apiKey: "cline-key",
-						models: [
-							{
-								id: modelId,
-								name: "Claude Sonnet 4.6",
-								metadata: { family: "claude-sonnet" },
-							},
-						],
+						providerId: "openai-native",
+						apiKey: "openai-key",
 					}
 				: {
 						providerId: "openrouter",
@@ -278,7 +273,10 @@ async function captureReasoningOptions({
 					},
 		],
 	});
-	const model = gateway.createAgentModel({ providerId, modelId }, defaults);
+	const model = gateway.createAgentModel(
+		{ providerId, modelId: resolvedModelId },
+		defaults,
+	);
 
 	await collect(
 		await model.stream({
@@ -1071,8 +1069,6 @@ describe("sdk-gateway", () => {
 		expect(strategyProviders).toEqual([
 			"aihubmix",
 			"anthropic",
-			"cline",
-			"cline-pass",
 			"minimax",
 			"oca",
 			"openrouter",
@@ -1874,108 +1870,7 @@ describe("sdk-gateway", () => {
 		expect(events[0]).toEqual(generatedImageEvent("image/png", "aGVsbG8="));
 	});
 
-	it("uses the OpenRouter image transport for dedicated Cline image models", async () => {
-		generateImageSpy.mockResolvedValue({
-			images: [{ mediaType: "image/png", base64: "aGVsbG8=" }],
-		});
-		const gateway = createGateway({
-			providerConfigs: [
-				{
-					providerId: "cline",
-					apiKey: "test",
-					models: [
-						{
-							id: "openai/gpt-image-test",
-							name: "Cline Image Test",
-							operation: "image-generation",
-							modalities: { input: ["text"], output: ["image"] },
-						},
-					],
-				},
-			],
-		});
 
-		const events = await collect(
-			await gateway.stream({
-				providerId: "cline",
-				modelId: "openai/gpt-image-test",
-				messages: baseMessages,
-			}),
-		);
-
-		expect(openRouterFactorySpy).toHaveBeenCalledWith(
-			expect.objectContaining({
-				apiKey: "test",
-				compatibility: "compatible",
-			}),
-		);
-		expect(openRouterImageSpy).toHaveBeenCalledWith("openai/gpt-image-test");
-		expect(generateImageSpy).toHaveBeenCalledWith(
-			expect.objectContaining({
-				model: expect.objectContaining({ family: "openrouter-image" }),
-				providerOptions: expect.objectContaining({
-					openrouter: expect.any(Object),
-				}),
-			}),
-		);
-		expect(events).toEqual([
-			generatedImageEvent("image/png", "aGVsbG8="),
-			{ type: "finish", reason: "stop" },
-		]);
-	});
-
-	it("uses the OpenRouter image transport for mixed Cline image models", async () => {
-		streamTextSpy.mockReturnValue({
-			fullStream: makeStreamParts([
-				{
-					type: "file",
-					file: { mediaType: "image/png", base64: "aGVsbG8=" },
-				},
-				{ type: "finish", finishReason: "stop" },
-			]),
-		});
-		const gateway = createGateway({
-			providerConfigs: [
-				{
-					providerId: "cline",
-					apiKey: "test",
-					models: [
-						{
-							id: "google/gemini-image-test",
-							name: "Cline Gemini Image Test",
-							modalities: {
-								input: ["text", "image"],
-								output: ["text", "image"],
-							},
-						},
-					],
-				},
-			],
-		});
-
-		const events = await collect(
-			await gateway.stream({
-				providerId: "cline",
-				modelId: "google/gemini-image-test",
-				messages: baseMessages,
-				reasoning: { enabled: true, effort: "low" },
-			}),
-		);
-
-		expect(openRouterChatSpy).toHaveBeenCalledWith("google/gemini-image-test");
-		expect(streamTextSpy).toHaveBeenCalledWith(
-			expect.objectContaining({
-				model: expect.objectContaining({ family: "openrouter-chat" }),
-				providerOptions: expect.objectContaining({
-					openrouter: expect.objectContaining({
-						modalities: ["image", "text"],
-					}),
-				}),
-			}),
-		);
-		expect(generateImageSpy).not.toHaveBeenCalled();
-		expect(events).toContainEqual(generatedImageEvent("image/png", "aGVsbG8="));
-	});
 
 	it("allows mixed image models to return text without an image", async () => {
 		streamTextSpy.mockReturnValue({
@@ -3732,118 +3627,6 @@ describe("sdk-gateway", () => {
 		expect(events.at(-1)).toEqual({ type: "finish", reason: "stop" });
 	});
 
-	it("uses discounted billed cost instead of Vercel market cost", async () => {
-		streamTextSpy.mockReturnValue({
-			fullStream: makeStreamParts([
-				{
-					type: "finish",
-					usage: {
-						prompt_tokens: 3793,
-						completion_tokens: 1250,
-						cost: 0.009145675,
-						market_cost: 0.01829135,
-					},
-					providerMetadata: {
-						gateway: {
-							cost: "0.009145675",
-							marketCost: "0.01829135",
-						},
-					},
-				},
-			]),
-		});
-
-		const gateway = createGateway({
-			providerConfigs: [
-				{
-					providerId: "cline",
-					apiKey: "cline-key",
-					models: [
-						{
-							id: "openai/gpt-5.4",
-							name: "GPT-5.4",
-							metadata: {
-								pricing: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
-							},
-						},
-					],
-				},
-			],
-		});
-
-		const events = await collect(
-			await gateway.stream({
-				providerId: "cline",
-				modelId: "openai/gpt-5.4",
-				messages: baseMessages,
-			}),
-		);
-
-		expect(events).toContainEqual({
-			type: "usage",
-			usage: {
-				inputTokens: 3793,
-				outputTokens: 1250,
-				cacheReadTokens: 0,
-				cacheWriteTokens: 0,
-				totalCost: 0.009145675,
-			},
-		});
-	});
-
-	it.each([
-		"cline-pass",
-		"cline",
-	])("emits zero cost for included models on %s", async (providerId) => {
-		streamTextSpy.mockReturnValue({
-			fullStream: makeStreamParts([
-				{
-					type: "finish",
-					usage: {
-						prompt_tokens: 1000,
-						completion_tokens: 200,
-						cost: 0.5,
-						market_cost: 1,
-					},
-				},
-			]),
-		});
-		const gateway = createGateway({
-			providerConfigs: [
-				{
-					providerId,
-					apiKey: "test-key",
-					models: [
-						{
-							id: "included-model",
-							name: "Included Model",
-							metadata: {
-								pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-							},
-						},
-					],
-				},
-			],
-		});
-		const events = await collect(
-			await gateway.stream({
-				providerId,
-				modelId: "included-model",
-				messages: baseMessages,
-			}),
-		);
-		expect(events).toContainEqual({
-			type: "usage",
-			usage: {
-				inputTokens: 1000,
-				outputTokens: 200,
-				cacheReadTokens: 0,
-				cacheWriteTokens: 0,
-				totalCost: 0,
-			},
-		});
-	});
-
 	it("preserves explicit zero cost instead of falling back to catalog pricing", async () => {
 		streamTextSpy.mockReturnValue({
 			fullStream: makeStreamParts([
@@ -3958,56 +3741,6 @@ describe("sdk-gateway", () => {
 		expect(usageEvent?.usage.totalCost).toBeCloseTo(0.003475, 12);
 	});
 
-	it("reads nested raw market cost for cline before falling back to pricing", async () => {
-		streamTextSpy.mockReturnValue({
-			fullStream: makeStreamParts([
-				{
-					type: "finish",
-					usage: {
-						prompt_tokens: 3793,
-						completion_tokens: 1250,
-						raw: {
-							cost: 0,
-							market_cost: 0.01829135,
-						},
-					},
-				},
-			]),
-		});
-
-		const gateway = createGateway({
-			providerConfigs: [
-				{
-					providerId: "cline",
-					apiKey: "cline-key",
-					models: [
-						{
-							id: "openai/gpt-5.4",
-							name: "GPT-5.4",
-							metadata: {
-								pricing: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
-							},
-						},
-					],
-				},
-			],
-		});
-
-		const events = await collect(
-			await gateway.stream({
-				providerId: "cline",
-				modelId: "openai/gpt-5.4",
-				messages: baseMessages,
-			}),
-		);
-
-		expect(events).toContainEqual({
-			type: "usage",
-			usage: expect.objectContaining({
-				totalCost: 0.01829135,
-			}),
-		});
-	});
 
 	it("uses nested raw upstream inference cost for vercel ai gateway", async () => {
 		streamTextSpy.mockReturnValue({
@@ -4220,111 +3953,7 @@ describe("sdk-gateway", () => {
 		});
 	});
 
-	it("does not emit duplicate usage when finish parts already carry totals", async () => {
-		streamTextSpy.mockReturnValue({
-			fullStream: makeStreamParts([
-				{
-					type: "finish",
-					usage: {
-						prompt_tokens: 1000,
-						completion_tokens: 25,
-						cache_creation_input_tokens: 50,
-						prompt_tokens_details: { cached_tokens: 200 },
-						market_cost: 0.0011,
-					},
-				},
-			]),
-			usage: Promise.resolve({
-				prompt_tokens: 1000,
-				completion_tokens: 25,
-				cache_creation_input_tokens: 50,
-				prompt_tokens_details: { cached_tokens: 200 },
-				market_cost: 0.0011,
-			}),
-		});
 
-		const gateway = createGateway({
-			providerConfigs: [
-				{
-					providerId: "cline",
-					apiKey: "cline-key",
-					models: [{ id: "openai/gpt-5.3-codex", name: "GPT-5.3 Codex" }],
-				},
-			],
-		});
-
-		const events = await collect(
-			await gateway.stream({
-				providerId: "cline",
-				modelId: "openai/gpt-5.3-codex",
-				messages: baseMessages,
-			}),
-		);
-
-		const usageEvents = events.filter(
-			(event): event is Extract<AgentModelEvent, { type: "usage" }> =>
-				event.type === "usage",
-		);
-		expect(usageEvents).toHaveLength(1);
-		expect(usageEvents[0]).toEqual({
-			type: "usage",
-			usage: {
-				inputTokens: 1000,
-				outputTokens: 25,
-				cacheReadTokens: 200,
-				cacheWriteTokens: 50,
-				totalCost: 0.0011,
-			},
-		});
-	});
-
-	it("reads cache write tokens from nested raw usage", async () => {
-		streamTextSpy.mockReturnValue({
-			usage: Promise.resolve({
-				inputTokens: 15997,
-				outputTokens: 4,
-				raw: {
-					prompt_tokens: 15997,
-					completion_tokens: 4,
-					cache_creation_input_tokens: 22,
-					market_cost: 0.0082385,
-				},
-			}),
-		});
-
-		const gateway = createGateway({
-			providerConfigs: [
-				{
-					providerId: "cline",
-					apiKey: "cline-key",
-					models: [
-						{
-							id: "anthropic/claude-opus-4.6",
-							name: "Claude Opus 4.6",
-						},
-					],
-				},
-			],
-		});
-
-		const events = await collect(
-			await gateway.stream({
-				providerId: "cline",
-				modelId: "anthropic/claude-opus-4.6",
-				messages: baseMessages,
-			}),
-		);
-
-		expect(events).toContainEqual({
-			type: "usage",
-			usage: expect.objectContaining({
-				inputTokens: 15997,
-				outputTokens: 4,
-				cacheWriteTokens: 22,
-				totalCost: 0.0082385,
-			}),
-		});
-	});
 
 	it("reads compatible-provider cache usage from nested provider metadata", async () => {
 		streamTextSpy.mockReturnValue({
@@ -6011,12 +5640,6 @@ describe("sdk-gateway", () => {
 
 	it.each([
 		{
-			providerId: "cline",
-			modelId: "qwen/qwen3.6-plus",
-			providerOptionsKey: "cline",
-			aliasKey: undefined,
-		},
-		{
 			providerId: "vercel-ai-gateway",
 			modelId: "alibaba/qwen3.6-plus",
 			// Hyphenated openai-compatible ids are written under the camelCase
@@ -6184,57 +5807,6 @@ describe("sdk-gateway", () => {
 		);
 	});
 
-	it("passes only canonical effort options for non-anthropic openai-compatible reasoning models", async () => {
-		streamTextSpy.mockReturnValue({
-			fullStream: makeStreamParts([
-				{ type: "finish", usage: { inputTokens: 1, outputTokens: 1 } },
-			]),
-		});
-
-		const gateway = createGateway({
-			providerConfigs: [
-				{
-					providerId: "cline",
-					apiKey: "cline-key",
-					models: [
-						{
-							id: "openai/gpt-5.4",
-							name: "GPT-5.4",
-							metadata: {
-								family: "gpt",
-							},
-						},
-					],
-				},
-			],
-		});
-
-		await collect(
-			await gateway.stream({
-				providerId: "cline",
-				modelId: "openai/gpt-5.4",
-				messages: baseMessages,
-				reasoning: {
-					effort: "high",
-				},
-			}),
-		);
-
-		expect(streamTextSpy).toHaveBeenCalledWith(
-			expect.objectContaining({
-				reasoning: "high",
-			}),
-		);
-		const call = streamTextSpy.mock.calls.at(-1)?.[0] as
-			| {
-					providerOptions?: Record<string, Record<string, unknown>>;
-			  }
-			| undefined;
-		expect(call?.providerOptions?.openaiCompatible).not.toHaveProperty(
-			"reasoningSummary",
-		);
-		expect(call?.providerOptions?.cline).not.toHaveProperty("reasoningSummary");
-	});
 
 	it("passes native Z.AI thinking enabled and disabled provider options for GLM", async () => {
 		streamTextSpy.mockReturnValue({
@@ -6341,165 +5913,6 @@ describe("sdk-gateway", () => {
 		);
 	});
 
-	it("passes routed GLM reasoning include/exclude provider options", async () => {
-		streamTextSpy.mockReturnValue({
-			fullStream: makeStreamParts([
-				{ type: "finish", usage: { inputTokens: 1, outputTokens: 1 } },
-			]),
-		});
-
-		const gateway = createGateway({
-			providerConfigs: [
-				{
-					providerId: "openrouter",
-					apiKey: "openrouter-key",
-				},
-				{
-					providerId: "cline",
-					apiKey: "cline-key",
-				},
-				{
-					providerId: "vercel-ai-gateway",
-					apiKey: "vercel-key",
-				},
-			],
-		});
-
-		await collect(
-			await gateway.stream({
-				providerId: "openrouter",
-				modelId: "z-ai/glm-4.7",
-				messages: baseMessages,
-				reasoning: {
-					enabled: true,
-				},
-			}),
-		);
-		await collect(
-			await gateway.stream({
-				providerId: "openrouter",
-				modelId: "z-ai/glm-4.7",
-				messages: baseMessages,
-				reasoning: {
-					enabled: false,
-				},
-			}),
-		);
-		await collect(
-			await gateway.stream({
-				providerId: "cline",
-				modelId: "z-ai/glm-4.7",
-				messages: baseMessages,
-				reasoning: {
-					enabled: false,
-				},
-			}),
-		);
-		await collect(
-			await gateway.stream({
-				providerId: "vercel-ai-gateway",
-				modelId: "z-ai/glm-4.7",
-				messages: baseMessages,
-				reasoning: {
-					enabled: false,
-				},
-			}),
-		);
-		await collect(
-			await gateway.stream({
-				providerId: "cline",
-				modelId: "z-ai/glm-4.7",
-				messages: baseMessages,
-				reasoning: {
-					enabled: true,
-				},
-			}),
-		);
-
-		// Explicit enablement rides the portable top-level reasoning option.
-		expect(streamTextSpy).toHaveBeenNthCalledWith(
-			1,
-			expect.objectContaining({
-				reasoning: "medium",
-			}),
-		);
-		{
-			const call = streamTextSpy.mock.calls[0]?.[0] as {
-				providerOptions?: Record<string, Record<string, unknown> | undefined>;
-			};
-			expect(call.providerOptions?.openrouter).not.toEqual(
-				expect.objectContaining({ reasoning: expect.anything() }),
-			);
-			expect(call.providerOptions?.openaiCompatible).not.toEqual(
-				expect.objectContaining({ reasoning: expect.anything() }),
-			);
-		}
-		// The OpenRouter catalog advertises a reasoning toggle for z-ai/glm-4.7,
-		// so explicit disablement is preserved and encoded in OpenRouter's wire
-		// shape. The compatible bucket retains the routed GLM exclusion shape.
-		expect(streamTextSpy).toHaveBeenNthCalledWith(
-			2,
-			expect.objectContaining({
-				providerOptions: expect.objectContaining({
-					openrouter: expect.objectContaining({
-						reasoning: { effort: "none" },
-					}),
-					openaiCompatible: expect.objectContaining({
-						reasoning: { exclude: true },
-					}),
-				}),
-			}),
-		);
-		expect(streamTextSpy).toHaveBeenNthCalledWith(
-			3,
-			expect.objectContaining({
-				providerOptions: expect.objectContaining({
-					openaiCompatible: expect.objectContaining({
-						reasoning: { exclude: true },
-					}),
-					cline: expect.objectContaining({
-						reasoning: { exclude: true },
-					}),
-				}),
-			}),
-		);
-		expect(streamTextSpy).toHaveBeenNthCalledWith(
-			4,
-			expect.objectContaining({
-				providerOptions: expect.objectContaining({
-					openaiCompatible: expect.objectContaining({
-						reasoning: { exclude: true },
-					}),
-					vercelAiGateway: expect.objectContaining({
-						reasoning: { exclude: true },
-					}),
-				}),
-			}),
-		);
-		expect(
-			(streamTextSpy.mock.calls[3]?.[0] as { providerOptions?: object })
-				.providerOptions,
-		).not.toHaveProperty("vercel-ai-gateway");
-		// Unlisted GLM ids route explicit enablement through the portable
-		// top-level reasoning option instead of the routed include shape.
-		expect(streamTextSpy).toHaveBeenNthCalledWith(
-			5,
-			expect.objectContaining({
-				reasoning: "medium",
-			}),
-		);
-		{
-			const call = streamTextSpy.mock.calls[4]?.[0] as {
-				providerOptions?: Record<string, Record<string, unknown> | undefined>;
-			};
-			expect(call.providerOptions?.cline).not.toEqual(
-				expect.objectContaining({ reasoning: expect.anything() }),
-			);
-			expect(call.providerOptions?.openaiCompatible).not.toEqual(
-				expect.objectContaining({ reasoning: expect.anything() }),
-			);
-		}
-	});
 
 	it("maps legacy model thinking options into gateway reasoning", async () => {
 		streamTextSpy.mockReturnValue({
@@ -6601,18 +6014,9 @@ describe("sdk-gateway", () => {
 			options: { reasoning: { effort: "high" } },
 			expected: "high",
 		},
-	])("$name", async ({ options, defaults, expected }) => {
-		expect(
-			await captureReasoningOptions({
-				providerId: "openrouter",
-				options,
-				defaults,
-			}),
-		).toEqual(expected);
-	});
-
-	it.each([
 		{
+			// `openrouter` routes through the openai-compatible transport, which
+			// normalizes an explicit disable onto the gateway's "none" effort.
 			name: "does not inherit active reasoning through a structured disable",
 			defaults: {
 				reasoning: { effort: "high" as const, budgetTokens: 4096 },
@@ -6622,22 +6026,16 @@ describe("sdk-gateway", () => {
 				reasoningEffort: "high",
 				thinkingBudgetTokens: 8192,
 			},
+			expected: { effort: "none" },
 		},
-		{
-			name: "lets a legacy disable override structured reasoning",
-			options: {
-				reasoning: { effort: "high" },
-				thinking: false,
-			},
-		},
-	])("$name", async ({ options, defaults }) => {
+	])("$name", async ({ options, defaults, expected }) => {
 		expect(
 			await captureReasoningOptions({
-				providerId: "cline",
+				providerId: "openrouter",
 				options,
 				defaults,
 			}),
-		).toEqual({ enabled: false });
+		).toEqual(expected);
 	});
 
 	it("adapts Anthropic and Gemini providers", async () => {
@@ -6863,32 +6261,6 @@ describe("sdk-gateway", () => {
 		);
 	});
 
-	it("allows unregistered model ids on known providers", async () => {
-		streamTextSpy.mockReturnValue({
-			fullStream: makeStreamParts([
-				{ type: "text-delta", textDelta: "Cline custom model" },
-				{ type: "finish", usage: { inputTokens: 4, outputTokens: 2 } },
-			]),
-		});
-
-		const gateway = createGateway({
-			providerConfigs: [{ providerId: "cline", apiKey: "test-key" }],
-		});
-
-		const events = await collect(
-			await gateway.stream({
-				providerId: "cline",
-				modelId: "google/gemma-4-31b-it",
-				messages: baseMessages,
-			}),
-		);
-
-		expect(openaiCompatibleSpy).toHaveBeenCalledWith("google/gemma-4-31b-it");
-		expect(events[0]).toEqual({
-			type: "text-delta",
-			text: "Cline custom model",
-		});
-	});
 
 	it("forwards a per-provider fetch through to the provider config", async () => {
 		const customFetch = vi.fn() as unknown as typeof fetch;

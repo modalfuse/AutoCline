@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type DiscoveryMockOptions = {
 	record?: Record<string, unknown>;
@@ -325,9 +325,27 @@ describe("checkManagedHubBuildMismatch", () => {
 });
 
 describe("watchManagedHubBuildMismatch", () => {
+	const hubPortSnapshot = process.env.CLINE_HUB_PORT;
+
+	beforeEach(() => {
+		// These cases exercise the managed-Hub watcher, which deliberately
+		// refuses to start when CLINE_HUB_PORT is set (explicit endpoint =>
+		// protocol-only compatibility). A full-suite harness may inject a
+		// random CLINE_HUB_PORT for isolation, which would silently turn the
+		// watcher off and make callback counts 0. Own the env here: clear the
+		// inherited override so the watcher runs as the managed path, and
+		// restore the parent value afterwards.
+		delete process.env.CLINE_HUB_PORT;
+	});
+
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.unstubAllEnvs();
+		if (hubPortSnapshot === undefined) {
+			delete process.env.CLINE_HUB_PORT;
+		} else {
+			process.env.CLINE_HUB_PORT = hubPortSnapshot;
+		}
 		vi.resetModules();
 	});
 

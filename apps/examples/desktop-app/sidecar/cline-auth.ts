@@ -1,6 +1,6 @@
 import {
 	captureAuthRefreshSoftFailure,
-	getProviderAuthHandler,
+	createClineAccountAuthHandler,
 	OAuthReauthRequiredError,
 	ProviderSettingsManager,
 	RuntimeOAuthTokenManager,
@@ -13,8 +13,14 @@ import { getClineEnvironmentConfig } from "@cline/shared";
  * for every caller (account requests, integrations, the connectors proxy).
  * The singleton coalesces local callers; RuntimeOAuthTokenManager also locks
  * refresh/read/save across processes sharing the provider settings file.
+ *
+ * Cloud account credentials are no longer part of the local provider auth
+ * registry, so the handler is created explicitly via the core factory (which
+ * derives the per-settings API base URL internally) and injected into the
+ * manager — the same instance is used for the persisted-token fallback.
  */
 let clineOAuthTokenManager: RuntimeOAuthTokenManager | undefined;
+const clineAuthHandler = createClineAccountAuthHandler();
 
 export type ClineAuthTelemetryContext = {
 	logger?: BasicLogger;
@@ -32,7 +38,12 @@ export async function resolveFreshClineAuthToken(
 ): Promise<string | undefined> {
 	let refreshError: Error | undefined;
 	try {
-		clineOAuthTokenManager ??= new RuntimeOAuthTokenManager();
+		clineOAuthTokenManager ??= new RuntimeOAuthTokenManager({
+			resolveAuthHandler: (providerId) =>
+				providerId === clineAuthHandler.providerId
+					? clineAuthHandler
+					: undefined,
+		});
 		const resolution = await clineOAuthTokenManager.resolveProviderApiKey({
 			providerId: "cline",
 		});
@@ -44,7 +55,7 @@ export async function resolveFreshClineAuthToken(
 		// surfaces the auth failure to the caller.
 		refreshError = error instanceof Error ? error : new Error(String(error));
 	}
-	const persisted = getProviderAuthHandler("cline")?.getApiKey(
+	const persisted = clineAuthHandler.getApiKey(
 		manager.getProviderSettings("cline"),
 	);
 	// Never-signed-in resolves to undefined without a refresh attempt and is

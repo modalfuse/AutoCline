@@ -60,7 +60,6 @@ export type HubCapabilityName =
 export const HUB_CAPABILITIES: readonly HubCapabilityName[] = [
 	"providers.list",
 	"providers.models.list",
-	"providers.models.recommended",
 	"providers.settings.save",
 	"providers.add",
 	"providers.models.update",
@@ -589,22 +588,6 @@ export interface HubPluginsReloadInput {
 	plugin: string;
 }
 
-export interface ClineRecommendedModel {
-	id: string;
-	/** Display-ready model name resolved against the model catalog. */
-	name: string;
-	description: string;
-	tags: string[];
-}
-
-export interface ClineRecommendedModelsData {
-	recommended: ClineRecommendedModel[];
-	free: ClineRecommendedModel[];
-	clinePass: ClineRecommendedModel[];
-	/** Free models offered only to cloud sessions (ClineFree). */
-	clineCloud?: ClineRecommendedModel[];
-}
-
 export interface HubProviderSaveResult {
 	providerId: string;
 	enabled: boolean;
@@ -627,9 +610,8 @@ export interface HubProviderMutationResult {
 
 /** Typed Hub command payloads shared by native and browser clients. */
 export interface HubCommandInputMap {
-	"providers.list": { isClinePassEnabled?: boolean };
+	"providers.list": Record<string, never>;
 	"providers.models.list": { providerId: string; includeCloudModels?: boolean };
-	"providers.models.recommended": Record<string, never>;
 	"providers.settings.save": Omit<SaveProviderSettingsActionRequest, "action">;
 	"providers.add": Omit<AddProviderActionRequest, "action">;
 	"providers.models.update": HubProviderModelsUpdateInput;
@@ -652,7 +634,6 @@ export interface HubCommandInputMap {
 export interface HubCommandOutputMap {
 	"providers.list": ProviderCatalogResponse;
 	"providers.models.list": ProviderModelsResponse;
-	"providers.models.recommended": ClineRecommendedModelsData;
 	"providers.settings.save": HubProviderSaveResult;
 	"providers.add": HubProviderMutationResult;
 	"providers.models.update": HubProviderMutationResult;
@@ -680,7 +661,6 @@ export type HubCommandOutput<TCommand extends HubTypedCommandName> =
 export type HubProviderCommandName =
 	| "providers.list"
 	| "providers.models.list"
-	| "providers.models.recommended"
 	| "providers.settings.save"
 	| "providers.add"
 	| "providers.models.update";

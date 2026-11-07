@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { resolveSessionDataDir } from "@cline/shared/storage";
+import { resolveClineDir, resolveSessionDataDir } from "@cline/shared/storage";
 import type { JsonRecord } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ export function toolApprovalDir(): string {
 function kanbanDataRoot(): string {
 	return (
 		process.env.CLINE_KANBAN_DATA_DIR?.trim() ||
-		join(homedir(), ".cline", "apps", "kanban")
+		join(resolveClineDir(), "apps", "kanban")
 	);
 }
 

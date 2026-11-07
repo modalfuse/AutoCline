@@ -158,7 +158,7 @@ Section
     Quit
   CreateDirectory "$INSTDIR"
   ClearErrors
-  FileOpen $0 "$INSTDIR\\cline-cli.exe" w
+  FileOpen $0 "$INSTDIR\\autocline-cli.exe" w
   IfErrors 0 +3
     SetErrorLevel 4
     Quit
@@ -170,6 +170,7 @@ SectionEnd
 Section "Uninstall"
   !insertmacro NSIS_HOOK_PREUNINSTALL
   ClearErrors
+  Delete "$INSTDIR\\autocline-cli.exe"
   Delete "$INSTDIR\\cline-cli.exe"
   Delete "$INSTDIR\\cline-app.exe"
   IfErrors 0 +2
@@ -201,28 +202,28 @@ SectionEnd
 		const dir = path.join(root, "fresh install");
 		expect(await run(installer, ["/S", `/D=${dir}`])).toBe(0);
 		expect(await run(installer, ["/S", `/D=${dir}`])).toBe(0);
-		expect(readFileSync(path.join(dir, "cline-cli.exe"), "utf8")).toBe(
+		expect(readFileSync(path.join(dir, "autocline-cli.exe"), "utf8")).toBe(
 			"replaced",
 		);
 	}, 120_000);
 
 	test("stops all target x64 processes, releases the file, and preserves another install", async () => {
 		const dir = path.join(root, "Cline 'quoted' $ space (测试)");
-		const beta = await start(`${dir} Beta`, "cline-cli.exe");
+		const beta = await start(`${dir} Beta`, "autocline-cli.exe");
 		const targets = [
 			await start(dir, "cline-app.exe"),
-			await start(dir, "cline-cli.exe"),
-			await start(dir, "cline-cli.exe"),
+			await start(dir, "autocline-cli.exe"),
+			await start(dir, "autocline-cli.exe"),
 		];
 		// Windows must actually have the executable locked before the test.
 		expect(() =>
-			writeFileSync(path.join(dir, "cline-cli.exe"), "locked"),
+			writeFileSync(path.join(dir, "autocline-cli.exe"), "locked"),
 		).toThrow();
 		expect(await run(installer, ["/S", `/D=${dir}`])).toBe(0);
 		await waitFor(() =>
 			targets.every((p) => p.exitCode !== null || p.signalCode !== null),
 		);
-		expect(readFileSync(path.join(dir, "cline-cli.exe"), "utf8")).toBe(
+		expect(readFileSync(path.join(dir, "autocline-cli.exe"), "utf8")).toBe(
 			"replaced",
 		);
 		expect(beta.exitCode).toBeNull();
@@ -232,23 +233,31 @@ SectionEnd
 	test("uninstaller releases the same files before deleting them", async () => {
 		const dir = path.join(root, "uninstall");
 		expect(await run(installer, ["/S", `/D=${dir}`])).toBe(0);
-		copyFileSync(fixture, path.join(dir, "cline-cli.exe"));
-		const target = await start(dir, "cline-cli.exe");
+		copyFileSync(fixture, path.join(dir, "autocline-cli.exe"));
+		const target = await start(dir, "autocline-cli.exe");
 		// _?= disables NSIS's temp-copy trampoline so we wait for the real exit.
 		expect(
 			await run(path.join(dir, "uninstall.exe"), ["/S", `_?=${dir}`]),
 		).toBe(0);
 		await waitFor(() => target.exitCode !== null || target.signalCode !== null);
-		expect(existsSync(path.join(dir, "cline-cli.exe"))).toBe(false);
+		expect(existsSync(path.join(dir, "autocline-cli.exe"))).toBe(false);
 	}, 120_000);
 
-	test("upgrade stops and removes the earlier backend executable", async () => {
+	test("upgrade stops and removes the earlier runtime and backend executables", async () => {
 		const dir = path.join(root, "upgrade");
+		// Renamed Hub runtime of earlier AutoCline releases and the backend
+		// executable of the releases before that; both may still be running.
+		const legacyCli = await start(dir, "cline-cli.exe");
 		const legacy = await start(dir, "code-sidecar.exe");
 		expect(await run(installer, ["/S", `/D=${dir}`])).toBe(0);
-		await waitFor(() => legacy.exitCode !== null || legacy.signalCode !== null);
+		await waitFor(
+			() =>
+				(legacyCli.exitCode !== null || legacyCli.signalCode !== null) &&
+				(legacy.exitCode !== null || legacy.signalCode !== null),
+		);
 		expect(existsSync(path.join(dir, "code-sidecar.exe"))).toBe(false);
-		expect(readFileSync(path.join(dir, "cline-cli.exe"), "utf8")).toBe(
+		expect(existsSync(path.join(dir, "cline-cli.exe"))).toBe(false);
+		expect(readFileSync(path.join(dir, "autocline-cli.exe"), "utf8")).toBe(
 			"replaced",
 		);
 	}, 120_000);
@@ -260,9 +269,9 @@ SectionEnd
 		// RmRegisterResources rejects directories with ERROR_ACCESS_DENIED.
 		// This exercises a real native error, not an injected API mock.
 		mkdirSync(path.join(dir, "cline-app.exe"), { recursive: true });
-		writeFileSync(path.join(dir, "cline-cli.exe"), "untouched");
+		writeFileSync(path.join(dir, "autocline-cli.exe"), "untouched");
 		expect(await run(installer, ["/S", `/D=${dir}`])).toBe(2);
-		expect(readFileSync(path.join(dir, "cline-cli.exe"), "utf8")).toBe(
+		expect(readFileSync(path.join(dir, "autocline-cli.exe"), "utf8")).toBe(
 			"untouched",
 		);
 		expect(existsSync(path.join(dir, "uninstall.exe"))).toBe(false);

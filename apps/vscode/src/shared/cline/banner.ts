@@ -74,11 +74,6 @@ export interface BannerAction {
 	 * - Others: generally unused
 	 */
 	arg?: string
-
-	/**
-	 * Optional model picker tab to open when using SetModel action
-	 */
-	tab?: "recommended" | "free"
 }
 
 /**

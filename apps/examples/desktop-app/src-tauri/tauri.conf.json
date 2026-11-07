@@ -40,7 +40,7 @@
 		"longDescription": "AutoCline is a fork of Cline, an AI coding agent. It reads your code, edits files, runs commands, and works through tasks with you in any project on your machine. Installs side by side with Cline.app and never replaces it.",
 		"homepage": "https://github.com/modalfuse/AutoCline",
 		"externalBin": [
-			"bin/cline-cli"
+			"bin/autocline-cli"
 		],
 		"resources": [
 			"icons/app/*.png",

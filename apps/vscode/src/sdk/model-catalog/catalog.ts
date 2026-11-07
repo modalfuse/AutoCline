@@ -190,9 +190,7 @@ function toProviderListing(provider: ProviderListItem): ProviderListing {
 
 async function listSdkProviderListings(): Promise<ReadonlyArray<ProviderListing>> {
 	const manager = getProviderSettingsManager()
-	const { providers } = await listLocalProviders(manager, {
-		isClinePassEnabled: true,
-	})
+	const { providers } = await listLocalProviders(manager)
 	return providers.map(toProviderListing)
 }
 

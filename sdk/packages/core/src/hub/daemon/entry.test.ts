@@ -90,9 +90,16 @@ vi.mock("../daemon/runtime-handlers", () => ({
 		mockCreateLocalHubScheduleRuntimeHandlers,
 }));
 
-vi.mock("../discovery/defaults", () => ({
-	resolveHubEndpointOptions: mockResolveHubEndpointOptions,
-}));
+// Partial mock: the real module's identity defaults are part of the contract
+// under test (hub-config.ts reads DEFAULT_HUB_HOST/PATHNAME directly), so only
+// the endpoint resolver is substituted.
+vi.mock("../discovery/defaults", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../discovery/defaults")>();
+	return {
+		...actual,
+		resolveHubEndpointOptions: mockResolveHubEndpointOptions,
+	};
+});
 
 vi.mock("../discovery/workspace", () => ({
 	resolveProductionHubOwnerContext: mockResolveProductionHubOwnerContext,
@@ -250,7 +257,9 @@ describe("hub daemon entry", () => {
 		void hubDaemonReady.then(() => {
 			ready = true;
 		});
-		await Promise.resolve();
+		await vi.waitFor(() => {
+			expect(releaseServer).toBeTypeOf("function");
+		});
 		expect(ready).toBe(false);
 
 		releaseServer();

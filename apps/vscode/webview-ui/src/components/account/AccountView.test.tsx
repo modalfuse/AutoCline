@@ -21,10 +21,6 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 	useExtensionState: () => ({ remoteConfigSettings: {}, environment: "production", cloudSessionsEnabled: false }),
 }))
 
-vi.mock("@/hooks/useClinePassPromo", () => ({
-	useClinePassPromo: () => ({ isClinePassEnabled: false }),
-}))
-
 vi.mock("@/services/grpc-client", () => ({
 	AccountServiceClient: {
 		setUserOrganization: mocks.setUserOrganization,

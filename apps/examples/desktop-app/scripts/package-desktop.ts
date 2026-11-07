@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { $ } from "bun";
+import { buildChildEnv } from "./build-env-hygiene";
 
 type DesktopPlatform = "mac" | "windows" | "linux";
 
@@ -15,7 +16,7 @@ const BOOLEAN_FLAGS = new Set(["--allow-unsigned-mac", "--skip-build"]);
 const VALUE_FLAGS = new Set(["--platform", "--target"]);
 const VALID_FLAGS = [...BOOLEAN_FLAGS, ...VALUE_FLAGS];
 
-const APP_NAME = "Cline";
+const APP_NAME = "AutoCline";
 const APP_ROOT = path.resolve(import.meta.dir, "..");
 const BUNDLE_ROOT = path.join(
 	APP_ROOT,
@@ -283,14 +284,26 @@ const main = async () => {
 		assertMacDistributionReady(allowUnsignedMac);
 	}
 
+	// Every build step runs from this already-credential-free env: the desktop
+	// backend bundle and the compiled CLI inline values from `process.env` via
+	// `--define`, so a key left in the shell (e.g. the coding CLI's temporary
+	// provider key) would otherwise become a literal inside the shipped app.
+	// Values are removed by name only and never printed.
+	const buildEnv = buildChildEnv();
+	if (buildEnv.removed.length > 0 || buildEnv.inlined.length > 0) {
+		console.log(
+			`build: withholding ${buildEnv.removed.length} credential and ${buildEnv.inlined.length} telemetry variable(s) from build children`,
+		);
+	}
+
 	if (!skipBuild) {
 		// Linux ships deb and rpm only. The AppImage target is skipped because
 		// linuxdeploy cannot process the Bun-compiled Cline CLI (ldd fails on it
 		// and patchelf corrupts it), which aborts the whole bundle step.
 		if (platform === "linux") {
-			await $`bun run build:binary --bundles deb,rpm`;
+			await $`bun run build:binary --bundles deb,rpm`.env(buildEnv.env);
 		} else {
-			await $`bun run build:binary`;
+			await $`bun run build:binary`.env(buildEnv.env);
 		}
 	}
 

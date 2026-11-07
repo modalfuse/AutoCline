@@ -5,12 +5,6 @@ import * as LlmsModels from "@cline/llms";
 import { CLINE_DEFAULT_MODEL_ID } from "@cline/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	FALLBACK_CLINE_RECOMMENDED_MODELS,
-	getCachedClineRecommendedModels,
-	idSlug,
-	resetClineRecommendedModelsCacheForTests,
-} from "../llms/cline-recommended-models";
-import {
 	clearLiveModelsCatalogCache,
 	clearPrivateModelsCatalogCache,
 } from "../llms/provider-defaults";
@@ -31,7 +25,6 @@ import {
 	getLocalTranscriptionModels,
 	isDedicatedTranscriptionModel,
 	listLocalProviders,
-	markLocalProviderEnabled,
 	normalizeOAuthProvider,
 	refreshProviderModelsFromSource,
 	resolveLocalClineAuthToken,
@@ -69,7 +62,6 @@ function makeTempManager(): {
 afterEach(() => {
 	clearLiveModelsCatalogCache();
 	clearPrivateModelsCatalogCache();
-	resetClineRecommendedModelsCacheForTests();
 	LlmsModels.resetRegistry();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
@@ -145,8 +137,10 @@ describe("live provider model loading", () => {
 		expect(
 			fetchMock.mock.calls.filter(([url]) => url.includes("models.dev")),
 		).toHaveLength(1);
-		// One shared models.dev request plus the Cline recommendation feed.
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		// A single shared models.dev request (the supported OpenRouter live
+		// catalog feed); it is reused on subsequent loads. The removed Cline
+		// featured/recommendation feed is never requested.
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps explicit model overrides above live metadata", async () => {
@@ -874,46 +868,29 @@ describe("addLocalProvider – model ID parsing via modelsSourceUrl", () => {
 		expect(models.map((m) => m.id).sort()).toEqual(["llama3.1", "qwen3:8b"]);
 	});
 
-	it("merges live Cline models into the registered catalog", async () => {
-		const liveModelId = "vendor/live-cline-model";
+	it("merges live OpenRouter models into the registered catalog", async () => {
+		const liveModelId = "vendor/live-openrouter-model";
 		const fetchMock = vi.fn(async (url: string) => {
-			if (url === "https://models.dev/api.json") {
-				return new Response(
-					JSON.stringify({
-						openrouter: {
-							models: {
-								[liveModelId]: {
-									name: "Live Cline Model",
-									tool_call: true,
-									reasoning: true,
-									limit: {
-										context: 256_000,
-										input: 200_000,
-										output: 32_000,
-									},
+			// Only the supported shared models.dev feed serves the OpenRouter
+			// catalog entry; any other request (e.g. the removed Cline
+			// featured/recommendation feed) must not be issued.
+			expect(url).toBe("https://models.dev/api.json");
+			return new Response(
+				JSON.stringify({
+					openrouter: {
+						models: {
+							[liveModelId]: {
+								name: "Live OpenRouter Model",
+								tool_call: true,
+								reasoning: true,
+								limit: {
+									context: 256_000,
+									input: 200_000,
+									output: 32_000,
 								},
 							},
 						},
-					}),
-					{
-						status: 200,
-						headers: { "content-type": "application/json" },
 					},
-				);
-			}
-
-			return new Response(
-				JSON.stringify({
-					recommended: [
-						{
-							id: liveModelId,
-							name: liveModelId,
-							description: "Fresh from the live catalog",
-							tags: ["NEW"],
-						},
-					],
-					free: [],
-					clinePass: [],
 				}),
 				{
 					status: 200,
@@ -923,118 +900,33 @@ describe("addLocalProvider – model ID parsing via modelsSourceUrl", () => {
 		});
 		vi.stubGlobal("fetch", fetchMock);
 
-		const { models } = await getLocalProviderModels("cline");
+		const { models } = await getLocalProviderModels("openrouter");
 
-		// models.dev and the recommended feed populate the live catalog; the
-		// recommended feed is fetched once more for the featured-tier overlay.
-		expect(fetchMock).toHaveBeenCalledTimes(3);
-		expect(models.find((model) => model.id === liveModelId)).toMatchObject({
+		// Exactly one request: the shared models.dev feed. The removed Cline
+		// recommended/featured endpoint is never called.
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(
+			fetchMock.mock.calls.filter(([url]) =>
+				String(url).includes("models.dev"),
+			),
+		).toHaveLength(1);
+		const merged = models.find((model) => model.id === liveModelId);
+		expect(merged).toMatchObject({
 			id: liveModelId,
-			name: "Live Cline Model",
+			name: "Live OpenRouter Model",
 			supportsReasoning: true,
-			description: "Fresh from the live catalog",
-			featured: { tier: "recommended", rank: 0, tags: ["NEW"] },
 		});
+		// No unsupported featured/recommendation metadata is attached.
+		expect(merged).not.toHaveProperty("featured");
 	});
 
-	it("uses only live ClinePass models when live models are found", async () => {
+	it("does not fetch or expose Cline Cloud models on the local Cline provider", async () => {
+		// The local `cline` provider no longer consumes the Cline Cloud / free
+		// catalog feed. Requesting the latest models must not fetch that feed
+		// nor expose its cloud/free entries. (The actual retained cloud product
+		// is covered separately below.)
 		const fetchMock = vi.fn(async (url: string) => {
-			if (url === "https://models.dev/api.json") {
-				return new Response(
-					JSON.stringify({
-						openrouter: {
-							models: {
-								"vendor/live-pass-model": {
-									name: "Live Pass Model",
-									tool_call: true,
-									reasoning: true,
-									limit: { context: 256_000, input: 200_000, output: 32_000 },
-								},
-								"vendor/live-free-model": {
-									name: "Live Free Model",
-									tool_call: true,
-									reasoning: true,
-									limit: { context: 512_000, input: 400_000, output: 64_000 },
-								},
-							},
-						},
-					}),
-					{
-						status: 200,
-						headers: { "content-type": "application/json" },
-					},
-				);
-			}
-
-			return new Response(
-				JSON.stringify({
-					clinePass: [
-						{
-							id: "cline-pass/live-pass-model",
-							name: "vendor/live-pass-model",
-						},
-					],
-					free: [{ id: "cline-free/live-free-model" }],
-				}),
-				{
-					status: 200,
-					headers: { "content-type": "application/json" },
-				},
-			);
-		});
-		vi.stubGlobal("fetch", fetchMock);
-
-		const { models } = await getLocalProviderModels("cline-pass");
-
-		// models.dev, the recommended-models feed via the live catalog, and
-		// the recommended-models feed again for the featured-tier overlay
-		// (separately cached; both caches are cold here).
-		expect(fetchMock).toHaveBeenCalledTimes(3);
-		expect(models.map((model) => model.id)).toEqual(
-			expect.arrayContaining([
-				"cline-pass/live-pass-model",
-				"cline-free/live-free-model",
-			]),
-		);
-		expect(
-			models.find((model) => model.id === "cline-pass/live-pass-model"),
-		).toMatchObject({
-			id: "cline-pass/live-pass-model",
-			name: "Live Pass Model",
-			supportsReasoning: true,
-		});
-		expect(
-			models.find((model) => model.id === "cline-free/live-free-model"),
-		).toMatchObject({
-			id: "cline-free/live-free-model",
-			name: "Live Free Model (free)",
-			supportsReasoning: true,
-		});
-	});
-
-	it("adds live Cline Cloud models to the Cline provider", async () => {
-		const fetchMock = vi.fn(async (url: string) => {
-			if (url === "https://models.dev/api.json") {
-				return new Response(JSON.stringify({}), { status: 200 });
-			}
-
-			return new Response(
-				JSON.stringify({
-					free: [
-						{
-							id: "cline-free/live-free-model",
-							name: "Live Free Model",
-						},
-					],
-					clineCloud: [
-						{
-							id: "cline-cloud/claude-sonnet-4.6",
-							name: "Claude Sonnet 4.6",
-						},
-					],
-				}),
-				{ status: 200 },
-			);
+			throw new Error(`unexpected fetch: ${url}`);
 		});
 		vi.stubGlobal("fetch", fetchMock);
 
@@ -1042,62 +934,25 @@ describe("addLocalProvider – model ID parsing via modelsSourceUrl", () => {
 			loadLatest: true,
 		});
 
-		expect(fetchMock).toHaveBeenCalledTimes(3);
-		expect(models).toContainEqual(
-			expect.objectContaining({
-				id: "cline-cloud/claude-sonnet-4.6",
-				name: "Claude Sonnet 4.6",
-			}),
+		// No catalog feed is requested for an absent local cline catalog.
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(
+			fetchMock.mock.calls.filter(
+				([url]) => !String(url).includes("models.dev"),
+			),
+		).toHaveLength(0);
+		expect(models).toEqual([]);
+		expect(models).not.toContainEqual(
+			expect.objectContaining({ id: "cline-cloud/claude-sonnet-4.6" }),
 		);
-		expect(models).toContainEqual(
-			expect.objectContaining({
-				id: "cline-free/live-free-model",
-				featured: expect.objectContaining({ tier: "free" }),
-			}),
+		expect(models).not.toContainEqual(
+			expect.objectContaining({ id: "cline-free/live-free-model" }),
 		);
-	});
-
-	it("falls back to generated ClinePass models when no live ClinePass models are found", async () => {
-		const fetchMock = vi.fn(async (url: string) => {
-			if (url === "https://models.dev/api.json") {
-				return new Response(
-					JSON.stringify({
-						openrouter: {
-							models: {
-								"vendor/live-openrouter-model": {
-									name: "Live OpenRouter Model",
-									tool_call: true,
-								},
-							},
-						},
-					}),
-					{
-						status: 200,
-						headers: { "content-type": "application/json" },
-					},
-				);
-			}
-
-			return new Response(JSON.stringify({ clinePass: [] }), {
-				status: 200,
-				headers: { "content-type": "application/json" },
-			});
-		});
-		vi.stubGlobal("fetch", fetchMock);
-
-		const { models } = await getLocalProviderModels("cline-pass");
-
-		// models.dev, the recommended-models feed via the live catalog, and
-		// the recommended-models feed again for the featured-tier overlay
-		// (separately cached; both caches are cold here).
-		const generatedId = Object.keys(
-			LlmsModels.getGeneratedModelsForProvider("cline-pass"),
-		).find((id) => id.startsWith("cline-pass/"));
-		expect(fetchMock).toHaveBeenCalledTimes(3);
-		expect(generatedId).toBeDefined();
-		expect(models.map((model) => model.id)).toContain(generatedId);
-		expect(models.map((model) => model.id)).not.toContain(
-			"vendor/live-openrouter-model",
+		expect(
+			models.some((model) => model.id.startsWith("cline-cloud/")),
+		).toBe(false);
+		expect(models.some((model) => model.id.startsWith("cline-free/"))).toBe(
+			false,
 		);
 	});
 
@@ -1569,10 +1424,12 @@ describe("addLocalProvider – capabilities", () => {
 			manager.getProviderConfig("litellm"),
 		);
 
+		// The authenticated private listing is authoritative: only the LiteLLM
+		// proxy model is exposed, and public bundled models are excluded.
 		expect(models.map((model) => model.id).sort()).toEqual([
-			"openai/gpt-4o-mini",
 			"private-proxy-model",
 		]);
+		expect(models.map((model) => model.id)).not.toContain("openai/gpt-4o-mini");
 		expect(models.map((model) => model.id)).not.toContain("gpt-5.4");
 		expect(
 			models.find((model) => model.id === "private-proxy-model"),
@@ -1967,6 +1824,12 @@ describe("authoritative voice model validation", () => {
 
 describe("models.json model overlays", () => {
 	it("loads model-only entries for built-in providers", async () => {
+		// A real supported built-in provider (OpenRouter) is used so the overlay
+		// exercises the generated catalog without guessing literal model data.
+		const builtinProviderId = "openrouter";
+		const overlayModelId = "vendor/overlay-only-model";
+		const overlayModelName = "Overlay Only Model";
+
 		vi.stubGlobal(
 			"fetch",
 			vi.fn().mockResolvedValue(
@@ -1976,6 +1839,14 @@ describe("models.json model overlays", () => {
 				}),
 			),
 		);
+
+		// Capture the pre-overlay built-in provider before models.json exists so
+		// provider identity/baseUrl/defaultModelId can be compared rather than
+		// re-asserted from guessed literal catalog data.
+		const builtinProviderBeforeOverlay =
+			await LlmsModels.getProvider(builtinProviderId);
+		expect(builtinProviderBeforeOverlay).toBeTruthy();
+
 		const dir = mkdtempSync(
 			path.join(os.tmpdir(), "local-provider-overlay-test-"),
 		);
@@ -1988,11 +1859,11 @@ describe("models.json model overlays", () => {
 					{
 						version: 1,
 						providers: {
-							cline: {
+							[builtinProviderId]: {
 								models: {
-									"openai/gpt-5.5": {
-										id: "openai/gpt-5.5",
-										name: "OpenAI GPT-5.5",
+									[overlayModelId]: {
+										id: overlayModelId,
+										name: overlayModelName,
 									},
 								},
 							},
@@ -2007,21 +1878,24 @@ describe("models.json model overlays", () => {
 				filePath: path.join(settingsDir, "providers.json"),
 			});
 
-			const provider = await LlmsModels.getProvider("cline");
-			expect(provider).toMatchObject({
-				id: "cline",
-				baseUrl: "https://api.cline.bot/api/v1",
-				defaultModelId:
-					LlmsModels.GENERATED_CLINE_RECOMMENDED_MODELS.recommended?.[0]?.id ??
-					CLINE_DEFAULT_MODEL_ID,
-			});
+			const provider = await LlmsModels.getProvider(builtinProviderId);
+			expect(provider).toBeTruthy();
+			// Model-only overlay preserves provider identity metadata.
+			expect(provider?.id).toBe(builtinProviderId);
+			expect(provider?.id).toBe(builtinProviderBeforeOverlay?.id);
+			expect(provider?.baseUrl).toBe(
+				builtinProviderBeforeOverlay?.baseUrl,
+			);
+			expect(provider?.defaultModelId).toBe(
+				builtinProviderBeforeOverlay?.defaultModelId,
+			);
 
-			const { models } = await getLocalProviderModels("cline");
+			const { models } = await getLocalProviderModels(builtinProviderId);
 			expect(
-				models.find((model) => model.id === "openai/gpt-5.5"),
+				models.find((model) => model.id === overlayModelId),
 			).toMatchObject({
-				id: "openai/gpt-5.5",
-				name: "OpenAI GPT-5.5",
+				id: overlayModelId,
+				name: overlayModelName,
 			});
 			expect(manager.getFilePath()).toBe(
 				path.join(settingsDir, "providers.json"),
@@ -2832,88 +2706,6 @@ describe("listLocalProviders", () => {
 		expect(ids).toContain("list-provider-b");
 	});
 
-	it("hides ClinePass when the ClinePass feature flag is disabled", async () => {
-		const { providers } = await listLocalProviders(manager, {
-			isClinePassEnabled: false,
-		});
-
-		expect(providers.map((p) => p.id)).not.toContain("cline-pass");
-	});
-
-	it("includes ClinePass when the ClinePass feature flag is enabled", async () => {
-		const { providers } = await listLocalProviders(manager, {
-			isClinePassEnabled: true,
-		});
-
-		expect(providers.map((p) => p.id)).toContain("cline-pass");
-	});
-
-	it("stamps featured tiers from the bundled fallback without a feed fetch", async () => {
-		const fetchMock = vi.fn();
-		vi.stubGlobal("fetch", fetchMock);
-
-		const { providers } = await listLocalProviders(manager);
-		const modelList =
-			providers.find((provider) => provider.id === "cline")?.modelList ?? [];
-		// Compare by slug: the bundled feed can spell a vendor differently from
-		// the catalog ("spacexai/grok-4.7" vs "x-ai/grok-4.7"), in which case the
-		// matcher stamps the catalog's id through its slug fallback.
-		const stampedSlugs = modelList
-			.filter((model) => model.featured?.tier === "recommended")
-			.map((model) => idSlug(model.id));
-		const modelSlugs = new Set(modelList.map((model) => idSlug(model.id)));
-		const expectedSlugs = FALLBACK_CLINE_RECOMMENDED_MODELS.recommended
-			.map((model) => idSlug(model.id))
-			.filter((slug) => modelSlugs.has(slug));
-
-		// A cold boot must still paint tiered sections: the catalog stamps
-		// synchronously from the bundled fallback instead of waiting on (or
-		// triggering) a feed fetch.
-		expect(stampedSlugs.length).toBeGreaterThan(0);
-		expect(new Set(stampedSlugs)).toEqual(new Set(expectedSlugs));
-		expect(fetchMock).not.toHaveBeenCalled();
-	});
-
-	it("stamps featured tiers from the cached live feed once warmed", async () => {
-		const clineModelIds = Object.keys(
-			await LlmsModels.getModelsForProvider("cline"),
-		);
-		const [recommendedId, freeId] = clineModelIds;
-		await getCachedClineRecommendedModels({
-			baseUrl: "https://api.example.test",
-			fetchImpl: async () =>
-				new Response(
-					JSON.stringify({
-						recommended: [
-							{
-								id: recommendedId,
-								name: "Live Pick",
-								description: "Live description",
-								tags: ["NEW"],
-							},
-						],
-						free: [{ id: freeId, name: "Live Free", description: "" }],
-						clinePass: [],
-					}),
-					{ status: 200, headers: { "Content-Type": "application/json" } },
-				),
-			catalogLoader: async () => ({}),
-		});
-
-		const { providers } = await listLocalProviders(manager);
-		const modelList =
-			providers.find((provider) => provider.id === "cline")?.modelList ?? [];
-
-		expect(
-			modelList.find((model) => model.id === recommendedId)?.featured,
-		).toEqual({ tier: "recommended", rank: 0, tags: ["NEW"] });
-		expect(modelList.find((model) => model.id === freeId)?.featured).toEqual({
-			tier: "free",
-			rank: 0,
-			tags: [],
-		});
-	});
-
 	it("marks enabled providers correctly", async () => {
 		await addLocalProvider(manager, {
 			providerId: "enabled-check-provider",
@@ -2941,94 +2733,6 @@ describe("listLocalProviders", () => {
 			providerId: "vercel-ai-gateway",
 			modelId: "new-transcription-model",
 		});
-	});
-
-	it("marks alias providers enabled without copying shared OAuth credentials", async () => {
-		manager.saveProviderSettings(
-			{
-				provider: "cline",
-				auth: {
-					accessToken: "shared-token",
-					refreshToken: "shared-refresh",
-				},
-			},
-			{ setLastUsed: false, tokenSource: "oauth" },
-		);
-
-		markLocalProviderEnabled(manager, "cline-pass", { tokenSource: "oauth" });
-
-		const state = manager.read();
-		expect(state.providers["cline-pass"]?.settings).toEqual({
-			provider: "cline-pass",
-		});
-		expect(state.providers["cline-pass"]?.tokenSource).toBe("oauth");
-	});
-
-	it("resolves shared OAuth metadata for ClinePass catalog entries", async () => {
-		manager.saveProviderSettings(
-			{
-				provider: "cline",
-				auth: {
-					accessToken: "shared-token",
-					refreshToken: "shared-refresh",
-				},
-			},
-			{ setLastUsed: false, tokenSource: "oauth" },
-		);
-		markLocalProviderEnabled(manager, "cline-pass", { tokenSource: "oauth" });
-
-		const { providers } = await listLocalProviders(manager, {
-			isClinePassEnabled: true,
-		});
-		const clinePass = providers.find(
-			(provider) => provider.id === "cline-pass",
-		);
-
-		expect(clinePass).toMatchObject({
-			enabled: true,
-			oauthAccessTokenPresent: true,
-		});
-	});
-
-	it("enables ClinePass from a Cline sign-in that never wrote a ClinePass entry", async () => {
-		// Desktop onboarding signs in as "cline" only; the shared credentials
-		// make ClinePass usable, so it must surface as enabled without its own
-		// providers.json entry.
-		manager.saveProviderSettings(
-			{
-				provider: "cline",
-				auth: {
-					accessToken: "shared-token",
-					refreshToken: "shared-refresh",
-				},
-			},
-			{ setLastUsed: false, tokenSource: "oauth" },
-		);
-
-		const { providers } = await listLocalProviders(manager, {
-			isClinePassEnabled: true,
-		});
-		const clinePass = providers.find(
-			(provider) => provider.id === "cline-pass",
-		);
-
-		expect(manager.read().providers["cline-pass"]).toBeUndefined();
-		expect(clinePass).toMatchObject({
-			enabled: true,
-			configured: true,
-			oauthAccessTokenPresent: true,
-		});
-	});
-
-	it("keeps ClinePass disabled when Cline has no entry", async () => {
-		const { providers } = await listLocalProviders(manager, {
-			isClinePassEnabled: true,
-		});
-		const clinePass = providers.find(
-			(provider) => provider.id === "cline-pass",
-		);
-
-		expect(clinePass?.enabled).toBe(false);
 	});
 
 	it("exposes model count", async () => {
@@ -3105,7 +2809,7 @@ describe("listLocalProviders", () => {
 		).toBe(false);
 	});
 
-	it("uses Cline-specific Z.ai aliases in the built-in model list", async () => {
+	it("keeps Z.ai generated provider and OpenRouter catalog aliases isolated", async () => {
 		manager.saveProviderSettings(
 			{
 				provider: "cline",
@@ -3117,20 +2821,21 @@ describe("listLocalProviders", () => {
 		);
 
 		const { providers } = await listLocalProviders(manager);
-		const cline = providers.find((provider) => provider.id === "cline");
+		const zai = providers.find((provider) => provider.id === "zai");
 		const openrouter = providers.find(
 			(provider) => provider.id === "openrouter",
 		);
-		const clineModelIds = new Set(
-			cline?.modelList?.map((model) => model.id) ?? [],
+		const zaiModelIds = new Set(
+			zai?.modelList?.map((model) => model.id) ?? [],
 		);
 		const openrouterModelIds = new Set(
 			openrouter?.modelList?.map((model) => model.id) ?? [],
 		);
 
-		expect(cline?.modelList?.length).toBeGreaterThan(0);
-		expect(clineModelIds).toContain("zai/glm-5.2");
-		expect(clineModelIds).not.toContain("z-ai/glm-5.2");
+		// The generated Z.ai provider owns the unprefixed model id.
+		expect(zaiModelIds).toContain("glm-5.2");
+		expect(zaiModelIds).not.toContain("z-ai/glm-5.2");
+		// OpenRouter owns the vendored z-ai/ prefixed id.
 		expect(openrouterModelIds).toContain("z-ai/glm-5.2");
 	});
 
@@ -3174,9 +2879,13 @@ describe("listLocalProviders", () => {
 // ===========================================================================
 
 describe("normalizeOAuthProvider", () => {
-	it("normalizes 'cline' to 'cline'", () => {
-		expect(normalizeOAuthProvider("cline")).toBe("cline");
-		expect(normalizeOAuthProvider("  CLINE  ")).toBe("cline");
+	it("rejects 'cline' as an OAuth provider", () => {
+		expect(() => normalizeOAuthProvider("cline")).toThrow(
+			"does not support OAuth login",
+		);
+		expect(() => normalizeOAuthProvider("  CLINE  ")).toThrow(
+			"does not support OAuth login",
+		);
 	});
 
 	it("normalizes 'oca' to 'oca'", () => {

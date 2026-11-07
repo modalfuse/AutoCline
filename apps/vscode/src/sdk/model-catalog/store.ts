@@ -107,7 +107,6 @@ const providerConfigStateKeys: Record<ProviderSettingsPatchKey, Partial<Record<s
 
 const modelInfoKeysByProvider: Partial<Record<string, ModelInfoKeys>> = {
 	openrouter: { plan: "planModeOpenRouterModelInfo", act: "actModeOpenRouterModelInfo" },
-	cline: { plan: "planModeClineModelInfo", act: "actModeClineModelInfo" },
 	openai: { plan: "planModeOpenAiModelInfo", act: "actModeOpenAiModelInfo" },
 	litellm: { plan: "planModeLiteLlmModelInfo", act: "actModeLiteLlmModelInfo" },
 	requesty: { plan: "planModeRequestyModelInfo", act: "actModeRequestyModelInfo" },

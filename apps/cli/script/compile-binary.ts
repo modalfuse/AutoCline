@@ -21,6 +21,11 @@ const rootDir = resolve(cliDir, "../..");
 // `cli-publish` GitHub Actions workflow. These are inlined via Bun's `define`
 // so the CLI ships with the production telemetry configuration without
 // requiring the end user to set any env vars.
+//
+// Inlining is the one way a value from the *build* environment ends up inside
+// the shipped binary, so nothing else may be added here, and the service keys
+// only inline for a release build: a local/desktop build must never bake
+// whatever telemetry key happens to sit in the developer's shell.
 const BUILD_TIME_INLINED_ENV_VARS = [
 	"TELEMETRY_SERVICE_API_KEY",
 	"ERROR_SERVICE_API_KEY",
@@ -35,10 +40,24 @@ const BUILD_TIME_INLINED_ENV_VARS = [
 	"OTEL_EXPORTER_OTLP_HEADERS",
 ] as const;
 
-function buildInlinedEnvDefines(): Record<string, string> {
+/** Vars inlined only for a release build (`AUTOCLINE_RELEASE_BUILD=1`). */
+const RELEASE_ONLY_INLINED_ENV_VARS = new Set<string>([
+	"TELEMETRY_SERVICE_API_KEY",
+	"ERROR_SERVICE_API_KEY",
+]);
+
+export const RELEASE_BUILD_ENV = "AUTOCLINE_RELEASE_BUILD";
+
+function buildInlinedEnvDefines(
+	env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+	const release = env[RELEASE_BUILD_ENV] === "1";
 	const defines: Record<string, string> = {};
 	for (const name of BUILD_TIME_INLINED_ENV_VARS) {
-		defines[`process.env.${name}`] = JSON.stringify(process.env[name] ?? "");
+		const allowed = release || !RELEASE_ONLY_INLINED_ENV_VARS.has(name);
+		defines[`process.env.${name}`] = JSON.stringify(
+			allowed ? (env[name] ?? "") : "",
+		);
 	}
 	return defines;
 }

@@ -5,10 +5,7 @@ import { HOME_VIEW_MAX_WIDTH } from "../../types";
 import { useOnboardingController } from "./controller";
 import { getOAuthProviderLabel, type OnboardingResult } from "./model";
 import {
-	OnboardingClineModelScreen,
-	OnboardingClinePassSubscriptionScreen,
 	OnboardingCustomModelIdScreen,
-	OnboardingDeviceCodeScreen,
 	OnboardingDoneScreen,
 	OnboardingLocalCliScreen,
 	OnboardingMainMenuScreen,
@@ -47,21 +44,6 @@ export function OnboardingView(props: OnboardingViewProps) {
 				label={getOAuthProviderLabel(state.oauthProvider)}
 				mouse={mouse}
 				oauthProvider={state.oauthProvider}
-			/>
-		);
-	}
-
-	if (state.step === "device_code") {
-		return (
-			<OnboardingDeviceCodeScreen
-				compact={compact}
-				contentWidth={contentWidth}
-				deviceError={state.deviceError}
-				deviceStatus={state.deviceStatus}
-				deviceUserCode={state.deviceUserCode}
-				deviceVerifyUrl={state.deviceVerifyUrl}
-				label={getOAuthProviderLabel(state.oauthProvider)}
-				mouse={mouse}
 			/>
 		);
 	}
@@ -107,37 +89,6 @@ export function OnboardingView(props: OnboardingViewProps) {
 				mouse={mouse}
 				providerList={state.providerList}
 				providersLoading={state.providersLoading}
-			/>
-		);
-	}
-
-	if (state.step === "cline_model") {
-		return (
-			<OnboardingClineModelScreen
-				clineEntries={state.clineEntries}
-				clineModelSelected={state.clineModelSelected}
-				compact={compact}
-				contentWidth={contentWidth}
-				mouse={mouse}
-				recommendedLoading={state.recommendedLoading}
-			/>
-		);
-	}
-
-	if (state.step === "cline_pass_subscription") {
-		return (
-			<OnboardingClinePassSubscriptionScreen
-				compact={compact}
-				contentWidth={contentWidth}
-				currentPlanName={state.clinePassCurrentPlanName}
-				error={state.clinePassSubscriptionError}
-				mouse={mouse}
-				openStatus={state.clinePassSubscriptionOpenStatus}
-				options={state.clinePassSubscriptionOptions}
-				planFeatures={state.clinePassPlanFeatures}
-				selected={state.clinePassSubscriptionSelected}
-				status={state.clinePassSubscriptionStatus}
-				subscriptionUrl={state.clinePassSubscriptionUrl}
 			/>
 		);
 	}

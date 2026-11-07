@@ -6,8 +6,12 @@ import {
 } from "@cline/core";
 import { resolveDesktopCliPath } from "./cli-runtime";
 
-/** Base name of the Cline CLI binary the desktop app bundles (Tauri externalBin). */
-export const DESKTOP_CLI_BINARY_NAME = "cline-cli";
+/**
+ * Base name of the AutoCline Hub runtime binary the desktop app bundles (Tauri
+ * externalBin `bin/autocline-cli`). It is the Cline CLI source built under the
+ * AutoCline name, so it never replaces the official `/usr/bin/cline-cli`.
+ */
+export const DESKTOP_CLI_BINARY_NAME = "autocline-cli";
 
 // Tauri's Linux bundles (deb, rpm, AppImage) install binaries under `usr/bin`
 // and resources under `usr/lib/<productName>`. The product name differs per

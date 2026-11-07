@@ -1,18 +1,12 @@
-import {
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	DESKTOP_NOTICE_ID,
 	getClineCliMigrationNotice,
 	markClineCliMigrationNoticeShown,
 	resolveCliNoticeStatePath,
-	shouldSuppressClineCliMigrationNoticeForActiveProvider,
 } from "./notice";
 
 const tempDirs: string[] = [];
@@ -30,13 +24,23 @@ describe("migration notice", () => {
 		}
 	});
 
-	it("returns the notice for a fresh data dir", () => {
+	it("returns the desktop notice for a fresh data dir", () => {
 		const dataDir = createTempDataDir();
 
-		expect(getClineCliMigrationNotice(dataDir)?.title).toBe("Try ClinePass");
+		const notice = getClineCliMigrationNotice(dataDir);
+		expect(notice?.id).toBe(DESKTOP_NOTICE_ID);
+		expect(notice?.url).toBe("https://cline.bot/desktop");
 	});
 
-	it("shows when only the old Kanban notice was marked as shown", () => {
+	it("has no ClinePass promo notice left", () => {
+		const dataDir = createTempDataDir();
+
+		const notice = getClineCliMigrationNotice(dataDir);
+		expect(notice?.id).not.toBe("cline-cli-cline-pass-intro");
+		expect(JSON.stringify(notice)).not.toContain("ClinePass");
+	});
+
+	it("shows when only the legacy Kanban notice was marked as shown", () => {
 		const dataDir = createTempDataDir();
 		const noticePath = resolveCliNoticeStatePath(dataDir);
 		mkdirSync(dirname(noticePath), { recursive: true, mode: 0o700 });
@@ -50,47 +54,31 @@ describe("migration notice", () => {
 			"utf8",
 		);
 
-		expect(getClineCliMigrationNotice(dataDir)?.id).toBe(
-			"cline-cli-cline-pass-intro",
+		expect(getClineCliMigrationNotice(dataDir)?.id).toBe(DESKTOP_NOTICE_ID);
+	});
+
+	it("ignores the retired ClinePass notice id", () => {
+		const dataDir = createTempDataDir();
+		const noticePath = resolveCliNoticeStatePath(dataDir);
+		mkdirSync(dirname(noticePath), { recursive: true, mode: 0o700 });
+		writeFileSync(
+			noticePath,
+			`${JSON.stringify(
+				{ shown: { "cline-cli-cline-pass-intro": true } },
+				null,
+				2,
+			)}\n`,
+			"utf8",
 		);
+
+		expect(getClineCliMigrationNotice(dataDir)?.id).toBe(DESKTOP_NOTICE_ID);
 	});
 
-	it("does not show after every notice is marked as shown", () => {
-		const dataDir = createTempDataDir();
-
-		markClineCliMigrationNoticeShown(dataDir);
-		markClineCliMigrationNoticeShown(dataDir, "cline-cli-desktop-launch");
-
-		expect(getClineCliMigrationNotice(dataDir)).toBeUndefined();
-	});
-
-	it("shows the desktop launch notice once the ClinePass intro was shown", () => {
+	it("does not show after the notice is marked as shown", () => {
 		const dataDir = createTempDataDir();
 
 		markClineCliMigrationNoticeShown(dataDir);
 
-		const notice = getClineCliMigrationNotice(dataDir);
-		expect(notice?.id).toBe("cline-cli-desktop-launch");
-		expect(notice?.url).toBe("https://cline.bot/desktop");
-	});
-
-	it("shows only one notice per launch", () => {
-		const dataDir = createTempDataDir();
-
-		expect(getClineCliMigrationNotice(dataDir)?.id).toBe(
-			"cline-cli-cline-pass-intro",
-		);
-	});
-
-	it("marks the desktop launch notice as shown by id", () => {
-		const dataDir = createTempDataDir();
-
-		markClineCliMigrationNoticeShown(dataDir);
-		markClineCliMigrationNoticeShown(dataDir, "cline-cli-desktop-launch");
-
-		const rawState = readFileSync(resolveCliNoticeStatePath(dataDir), "utf8");
-		expect(rawState).toContain('"cline-cli-cline-pass-intro": true');
-		expect(rawState).toContain('"cline-cli-desktop-launch": true');
 		expect(getClineCliMigrationNotice(dataDir)).toBeUndefined();
 	});
 
@@ -101,9 +89,9 @@ describe("migration notice", () => {
 
 		expect(
 			getClineCliMigrationNotice(dataDir, {
-				CLINE_FORCE_CLINE_PASS_NOTICE: "1",
-			}),
-		).toBeDefined();
+				CLINE_FORCE_CLINE_CLI_NOTICE: "1",
+			})?.id,
+		).toBe(DESKTOP_NOTICE_ID);
 	});
 
 	it("does not show when disabled through the environment", () => {
@@ -116,64 +104,24 @@ describe("migration notice", () => {
 		).toBeUndefined();
 	});
 
-	it("does not show the ClinePass intro when ClinePass is already the active provider", () => {
-		const dataDir = createTempDataDir();
-
-		expect(
-			getClineCliMigrationNotice(
-				dataDir,
-				{},
-				{ activeProviderId: "cline-pass" },
-			)?.id,
-		).toBe("cline-cli-desktop-launch");
-	});
-
-	it("suppresses the active ClinePass provider even when the provider id has surrounding whitespace", () => {
-		expect(
-			shouldSuppressClineCliMigrationNoticeForActiveProvider(" cline-pass "),
-		).toBe(true);
-	});
-
-	it("does not suppress the active ClinePass provider when forced", () => {
-		expect(
-			shouldSuppressClineCliMigrationNoticeForActiveProvider("cline-pass", {
-				CLINE_FORCE_CLINE_PASS_NOTICE: "1",
-			}),
-		).toBe(false);
-	});
-
-	it("shows for the active ClinePass provider when forced", () => {
-		const dataDir = createTempDataDir();
-
-		expect(
-			getClineCliMigrationNotice(
-				dataDir,
-				{ CLINE_FORCE_CLINE_PASS_NOTICE: "1" },
-				{ activeProviderId: "cline-pass" },
-			),
-		).toBeDefined();
-	});
-
 	it("shows when forced even if disabled through the environment", () => {
 		const dataDir = createTempDataDir();
 
 		expect(
 			getClineCliMigrationNotice(dataDir, {
 				CLINE_DISABLE_CLINE_PASS_NOTICE: "1",
-				CLINE_FORCE_CLINE_PASS_NOTICE: "1",
+				CLINE_FORCE_CLINE_CLI_NOTICE: "1",
 			}),
 		).toBeDefined();
 	});
 
-	it("marks the notice as shown", () => {
+	it("marks the desktop notice as shown by id", () => {
 		const dataDir = createTempDataDir();
 
-		markClineCliMigrationNoticeShown(dataDir);
+		markClineCliMigrationNoticeShown(dataDir, DESKTOP_NOTICE_ID);
 
 		const rawState = readFileSync(resolveCliNoticeStatePath(dataDir), "utf8");
-		expect(rawState).toContain("cline-cli-cline-pass-intro");
-		expect(getClineCliMigrationNotice(dataDir)?.id).not.toBe(
-			"cline-cli-cline-pass-intro",
-		);
+		expect(rawState).toContain('"cline-cli-desktop-launch": true');
+		expect(getClineCliMigrationNotice(dataDir)).toBeUndefined();
 	});
 });

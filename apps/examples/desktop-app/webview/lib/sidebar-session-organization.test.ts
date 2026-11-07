@@ -144,13 +144,23 @@ describe("sidebar session organization", () => {
 				thread("a", "/ws", { isScheduled: true, scheduleRunNumber: 7 }),
 			),
 		).toBe("Run 7");
+		const startedAt = "2026-08-31T19:31:40.834Z";
 		const dated = scheduleRunLabel(
-			thread("b", "/ws", {
-				isScheduled: true,
-				startedAt: "2026-08-31T19:31:40.834Z",
+			thread("b", "/ws", { isScheduled: true, startedAt }),
+		);
+		// The label renders the start time in the viewer's own timezone, so the
+		// expectation is built the same way instead of pinning a UTC month.
+		expect(dated).toBe(
+			new Date(startedAt).toLocaleString(undefined, {
+				month: "short",
+				day: "numeric",
+				hour: "numeric",
+				minute: "2-digit",
 			}),
 		);
-		expect(dated).toMatch(/Aug 31/);
+		expect(dated).toContain(
+			new Date(startedAt).toLocaleDateString(undefined, { day: "numeric" }),
+		);
 		expect(dated).not.toBe("Run");
 		expect(scheduleRunLabel(thread("c", "/ws", { isScheduled: true }))).toBe(
 			"Run",

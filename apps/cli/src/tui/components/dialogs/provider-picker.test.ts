@@ -8,7 +8,6 @@ import {
 	isProviderConfigured,
 } from "../../../utils/provider-auth";
 import {
-	buildClinePassSubscriptionPageUrl,
 	resolveOAuthWaitKeyAction,
 	saveManualProviderApiKey,
 } from "./provider-picker-helpers";
@@ -47,26 +46,6 @@ describe("resolveOAuthWaitKeyAction", () => {
 	});
 });
 
-describe("buildClinePassSubscriptionPageUrl", () => {
-	it("opens the personal subscription page on production by default", () => {
-		expect(
-			buildClinePassSubscriptionPageUrl(undefined).startsWith(
-				"https://app.cline.bot/dashboard/subscription?personal=true",
-			),
-		).toBe(true);
-	});
-
-	it("keeps the configured app base URL", () => {
-		expect(
-			buildClinePassSubscriptionPageUrl(
-				"https://staging-app.cline.bot",
-			).startsWith(
-				"https://staging-app.cline.bot/dashboard/subscription?personal=true",
-			),
-		).toBe(true);
-	});
-});
-
 describe("saveManualProviderApiKey", () => {
 	const tempDirs: string[] = [];
 
@@ -87,7 +66,7 @@ describe("saveManualProviderApiKey", () => {
 	it("clears stored OAuth tokens so the manual key takes effect", async () => {
 		const manager = createManager();
 		manager.saveProviderSettings({
-			provider: "cline",
+			provider: "anthropic",
 			auth: {
 				accessToken: "stale-access-token",
 				refreshToken: "stale-refresh-token",
@@ -95,70 +74,16 @@ describe("saveManualProviderApiKey", () => {
 			},
 		});
 
-		await saveManualProviderApiKey(manager, "cline", "manual-api-key");
+		await saveManualProviderApiKey(manager, "anthropic", "manual-api-key");
 
-		const settings = manager.getProviderSettings("cline");
+		const settings = manager.getProviderSettings("anthropic");
 		expect(settings?.apiKey).toBe("manual-api-key");
 		expect(settings?.auth?.accessToken).toBeUndefined();
 		expect(settings?.auth?.refreshToken).toBeUndefined();
 		expect(settings?.auth?.accountId).toBe("acct_123");
-		expect(getPersistedProviderApiKey("cline", settings)).toBe(
+		expect(getPersistedProviderApiKey("anthropic", settings)).toBe(
 			"manual-api-key",
 		);
-		expect(isProviderConfigured("cline", settings)).toBe(true);
-	});
-
-	it("saves cline-pass keys to the shared cline auth storage entry", async () => {
-		const manager = createManager();
-		manager.saveProviderSettings({
-			provider: "cline",
-			auth: {
-				accessToken: "stale-access-token",
-				refreshToken: "stale-refresh-token",
-			},
-		});
-
-		await saveManualProviderApiKey(manager, "cline-pass", "manual-api-key");
-
-		// cline-pass inherits auth storage from the "cline" entry, so the key
-		// must land there and the stale tokens must be gone for both providers.
-		const clineSettings = manager.getProviderSettings("cline");
-		expect(clineSettings?.apiKey).toBe("manual-api-key");
-		expect(clineSettings?.auth?.accessToken).toBeUndefined();
-
-		const clinePassSettings = manager.getProviderSettings("cline-pass");
-		expect(getPersistedProviderApiKey("cline-pass", clinePassSettings)).toBe(
-			"manual-api-key",
-		);
-		expect(isProviderConfigured("cline-pass", clinePassSettings)).toBe(true);
-	});
-
-	it("clears stale credentials copied into a direct cline-pass entry", async () => {
-		const manager = createManager();
-		manager.saveProviderSettings({
-			provider: "cline",
-			auth: {
-				accessToken: "stale-access-token",
-				refreshToken: "stale-refresh-token",
-			},
-		});
-		// Provider switching copies the merged settings (including auth) into
-		// a direct cline-pass entry, which shadows the shared "cline" entry.
-		manager.saveProviderSettings({
-			provider: "cline-pass",
-			apiKey: "stale-copied-key",
-			auth: {
-				accessToken: "stale-access-token",
-				refreshToken: "stale-refresh-token",
-			},
-		});
-
-		await saveManualProviderApiKey(manager, "cline-pass", "manual-api-key");
-
-		const clinePassSettings = manager.getProviderSettings("cline-pass");
-		expect(clinePassSettings?.auth?.accessToken).toBeUndefined();
-		expect(getPersistedProviderApiKey("cline-pass", clinePassSettings)).toBe(
-			"manual-api-key",
-		);
+		expect(isProviderConfigured("anthropic", settings)).toBe(true);
 	});
 });

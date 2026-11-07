@@ -1525,7 +1525,7 @@ describe("translateSessionEvent — agent_event error", () => {
 	})
 
 	it("reshapes insufficient_credits error into ClineError-compatible format", () => {
-		const state = new MessageTranslatorState()
+		const state = new MessageTranslatorState(undefined, () => "cline")
 		const errorJson = JSON.stringify({
 			code: "insufficient_credits",
 			current_balance: -0.14,
@@ -1580,7 +1580,7 @@ describe("translateSessionEvent — agent_event error", () => {
 	})
 
 	it("reshapes SPEND_LIMIT_EXCEEDED error into ClineError-compatible format", () => {
-		const state = new MessageTranslatorState()
+		const state = new MessageTranslatorState(undefined, () => "cline")
 		const errorJson = JSON.stringify({
 			code: "SPEND_LIMIT_EXCEEDED",
 			limit_scope: "user",
@@ -1613,7 +1613,7 @@ describe("translateSessionEvent — agent_event error", () => {
 	})
 
 	it("reshapes plain-text insufficient credits error into ClineError-compatible format", () => {
-		const state = new MessageTranslatorState()
+		const state = new MessageTranslatorState(undefined, () => "cline")
 		// The SDK often extracts human-readable text from the API response,
 		// losing the structured JSON. This tests that plain-text balance errors
 		// are still detected and reshaped.
@@ -1642,7 +1642,7 @@ describe("translateSessionEvent — agent_event error", () => {
 	})
 
 	it("reshapes plain-text 'Not enough credits' error into ClineError-compatible format", () => {
-		const state = new MessageTranslatorState()
+		const state = new MessageTranslatorState(undefined, () => "cline")
 		const event: CoreSessionEvent = {
 			type: "agent_event",
 			payload: {
@@ -1665,7 +1665,7 @@ describe("translateSessionEvent — agent_event error", () => {
 	})
 
 	it("reshapes plain-text spend limit error into ClineError-compatible format", () => {
-		const state = new MessageTranslatorState()
+		const state = new MessageTranslatorState(undefined, () => "cline")
 		const event: CoreSessionEvent = {
 			type: "agent_event",
 			payload: {

@@ -1,12 +1,10 @@
 import {
-	fetchClineRecommendedModels,
 	getProviderConfigFields,
 	Llms,
 	ProviderSettingsManager,
 	refreshProviderModelsFromSource,
 	resolveProviderConfig,
 } from "@cline/core";
-import { isClineProvider } from "@cline/shared";
 import type { ChoiceContext } from "@opentui-ui/dialog";
 import type { DialogActions } from "@opentui-ui/dialog/react";
 import { useCallback } from "react";
@@ -19,7 +17,6 @@ import {
 import type { Config } from "../../utils/types";
 import { withLoadingDialog } from "../components/dialogs/loading-dialog";
 import {
-	ClinePassSubscriptionContent,
 	type ExistingProviderOption,
 	LocalCliStatusContent,
 	OAuthApiKeyInputContent,
@@ -29,11 +26,6 @@ import {
 	ProviderPickerContent,
 	UseExistingOrReconfigureContent,
 } from "../components/dialogs/provider-picker";
-import { buildFeaturedModelEntries } from "../components/model-selector/cline-model-picker";
-import {
-	BROWSE_ALL_ACTION,
-	ClineModelSelectorDialogContent,
-} from "../components/model-selector/cline-model-selector";
 import {
 	buildModelOptions,
 	CHANGE_PROVIDER_ACTION,
@@ -128,36 +120,6 @@ async function fetchOpenAiCompatibleModelIds(
 	}
 }
 
-function providerToExistingProviderOptions(input: {
-	providerId: string;
-	providerName: string;
-	dialog: DialogActions;
-	termHeight: number;
-}): ExistingProviderOption[] {
-	if (input.providerId !== "cline-pass") {
-		return [];
-	}
-
-	return [
-		{
-			value: "open_subscription_page",
-			label: "Manage subscription & see usage",
-			onSelect: async () => {
-				await input.dialog.choice<boolean>({
-					style: { maxHeight: input.termHeight - 2 },
-					closeOnEscape: false,
-					content: (ctx: ChoiceContext<boolean>) => (
-						<ClinePassSubscriptionContent
-							{...ctx}
-							providerName={input.providerName}
-						/>
-					),
-				});
-			},
-		},
-	];
-}
-
 async function runProviderChange(
 	dialog: DialogActions,
 	config: Config,
@@ -183,9 +145,6 @@ async function runProviderChange(
 		resolveProviderSetupRoute(newProviderId) === "local_cli";
 	const localCliProvider = getLocalCliInfo(newProviderId);
 
-	// Manual API key entry is the escape hatch for when OAuth login isn't
-	// working; only the Cline providers accept a dashboard API key.
-	const supportsManualApiKey = isClineProvider(newProviderId);
 	const openManualApiKeyDialog = async (): Promise<boolean | undefined> =>
 		await dialog.choice<boolean>({
 			style: { maxHeight: termHeight - 2 },
@@ -202,32 +161,16 @@ async function runProviderChange(
 
 	let needsAuth = true;
 	if (isProviderConfigured(newProviderId, existingSettings)) {
-		let option: ExistingProviderOption | undefined;
-		const extraOptions = providerToExistingProviderOptions({
-			providerId: newProviderId,
-			providerName: displayName,
-			dialog,
-			termHeight,
+		const option = await dialog.choice<ExistingProviderOption>({
+			style: { maxHeight: termHeight - 2 },
+			content: (ctx: ChoiceContext<ExistingProviderOption>) => (
+				<UseExistingOrReconfigureContent
+					{...ctx}
+					providerName={displayName}
+				/>
+			),
 		});
-		while (true) {
-			option = await dialog.choice<ExistingProviderOption>({
-				style: { maxHeight: termHeight - 2 },
-				content: (ctx: ChoiceContext<ExistingProviderOption>) => (
-					<UseExistingOrReconfigureContent
-						{...ctx}
-						providerName={displayName}
-						extraOptions={extraOptions}
-					/>
-				),
-			});
-			if (!option) return false;
-			if (option.onSelect) {
-				await option.onSelect();
-				option = undefined;
-				continue;
-			}
-			break;
-		}
+		if (!option) return false;
 		needsAuth = option.value === "reconfigure";
 	}
 
@@ -242,8 +185,7 @@ async function runProviderChange(
 						{...ctx}
 						providerId={newProviderId}
 						providerName={displayName}
-						allowApiKeyFallback={supportsManualApiKey}
-					/>
+						/>
 				),
 			});
 			saved =
@@ -438,129 +380,6 @@ export function useModelSelector(opts: {
 					continue;
 				}
 
-				if (
-					config.providerId === "cline" ||
-					config.providerId === "cline-pass"
-				) {
-					// ClinePass gets the same sectioned picker with Subscribed/Free
-					// sections — free models are selectable while staying on ClinePass
-					const featuredProviderId = config.providerId;
-					const clineResult = await dialog.choice<string>({
-						style: { maxHeight: termHeight - 2 },
-						content: (ctx: ChoiceContext<string>) => (
-							<ClineModelSelectorDialogContent
-								{...ctx}
-								currentModel={config.modelId}
-								currentProviderName={providerDisplayName}
-								loadEntries={async () =>
-									buildFeaturedModelEntries(
-										featuredProviderId,
-										await fetchClineRecommendedModels(),
-									)
-								}
-							/>
-						),
-					});
-					if (!clineResult) {
-						await handleCancel();
-						return;
-					}
-					if (clineResult === CHANGE_PROVIDER_ACTION) {
-						await changeProvider();
-						continue;
-					}
-					if (clineResult === BROWSE_ALL_ACTION) {
-						const browseResult = await dialog.choice<string>({
-							style: { maxHeight: termHeight - 2 },
-							content: (ctx: ChoiceContext<string>) => (
-								<ModelSelectorContent
-									{...ctx}
-									currentModel={config.modelId}
-									currentProviderName={providerDisplayName}
-									models={modelOptions}
-									showCustomModelId={config.providerId !== "cline-pass"}
-								/>
-							),
-						});
-						if (!browseResult) continue;
-						if (browseResult === CHANGE_PROVIDER_ACTION) {
-							await changeProvider();
-							continue;
-						}
-						config.modelId = browseResult;
-						const browseModel = modelOptions.find(
-							(m: ModelOption) => m.key === browseResult,
-						);
-						if (browseModel?.supportsReasoning) {
-							const lvl: ThinkingLevel = config.reasoningEffort
-								? (config.reasoningEffort as ThinkingLevel)
-								: config.thinking
-									? "medium"
-									: "none";
-							const pick = await dialog.choice<ThinkingLevel>({
-								style: { maxHeight: termHeight - 2 },
-								content: (ctx: ChoiceContext<ThinkingLevel>) => (
-									<ThinkingLevelContent
-										{...ctx}
-										modelName={browseModel.name}
-										currentLevel={lvl}
-									/>
-								),
-							});
-							if (pick !== undefined) {
-								if (pick === "none") {
-									config.thinking = false;
-									config.reasoningEffort = undefined;
-								} else {
-									config.thinking = true;
-									config.reasoningEffort = pick;
-								}
-							}
-						}
-						if (!browseModel?.supportsReasoning) {
-							clearReasoningConfig(config);
-						}
-						pickingModel = false;
-						continue;
-					}
-
-					config.modelId = clineResult;
-					const selectedModel = modelOptions.find(
-						(m: ModelOption) => m.key === clineResult,
-					);
-					if (selectedModel?.supportsReasoning) {
-						const currentLevel: ThinkingLevel = config.reasoningEffort
-							? (config.reasoningEffort as ThinkingLevel)
-							: config.thinking
-								? "medium"
-								: "none";
-						const thinkingLevel = await dialog.choice<ThinkingLevel>({
-							style: { maxHeight: termHeight - 2 },
-							content: (ctx: ChoiceContext<ThinkingLevel>) => (
-								<ThinkingLevelContent
-									{...ctx}
-									modelName={selectedModel.name}
-									currentLevel={currentLevel}
-								/>
-							),
-						});
-						if (thinkingLevel !== undefined) {
-							if (thinkingLevel === "none") {
-								config.thinking = false;
-								config.reasoningEffort = undefined;
-							} else {
-								config.thinking = true;
-								config.reasoningEffort = thinkingLevel;
-							}
-						}
-					}
-					if (!selectedModel?.supportsReasoning) {
-						clearReasoningConfig(config);
-					}
-					pickingModel = false;
-					continue;
-				}
-
 				const selectedKey = await dialog.choice<string>({
 					style: { maxHeight: termHeight - 2 },
 					content: (ctx: ChoiceContext<string>) => (
@@ -569,7 +388,7 @@ export function useModelSelector(opts: {
 							currentModel={config.modelId}
 							currentProviderName={providerDisplayName}
 							models={modelOptions}
-							showCustomModelId={config.providerId !== "cline-pass"}
+							showCustomModelId
 						/>
 					),
 				});

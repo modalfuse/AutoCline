@@ -1,4 +1,4 @@
-import { buildModelInfoNameMap, type ModelInfo, openAiModelInfoSafeDefaults, resolveClinePassModelInfo } from "@shared/api"
+import { type ModelInfo, openAiModelInfoSafeDefaults } from "@shared/api"
 import { StringRequest } from "@shared/proto/cline/common"
 import type { OnboardingModel, OnboardingModelGroup, OpenRouterModelInfo } from "@shared/proto/index.cline"
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
@@ -10,16 +10,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Item, ItemContent, ItemDescription, ItemHeader, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { useExtensionState } from "@/context/ExtensionStateContext"
-import { useProviderConfig } from "@/hooks/useProviderConfig"
-import { useProviderModels } from "@/hooks/useProviderModels"
 import { cn } from "@/lib/utils"
 import { AccountServiceClient, StateServiceClient, UiServiceClient } from "@/services/grpc-client"
 import ApiConfigurationSection from "../settings/sections/ApiConfigurationSection"
 import { useApiConfigurationHandlers } from "../settings/utils/useApiConfigurationHandlers"
 import WelcomeView from "../welcome/WelcomeView"
-import { setPendingClinePassSubscribe } from "./clinePassSubscribe"
 import {
-	CLINEPASS_GROUP,
 	getCapabilities,
 	getClineUIOnboardingGroups,
 	getOnboardingGroupDisplayName,
@@ -55,7 +51,7 @@ const getOnboardingPage = (step: number, userType: NEW_USER_TYPE): OnboardingPag
 }
 
 type ModelSelectionProps = {
-	userType: NEW_USER_TYPE.FREE | NEW_USER_TYPE.POWER | NEW_USER_TYPE.CLINE_PASS
+	userType: NEW_USER_TYPE.FREE | NEW_USER_TYPE.POWER
 	selectedModelId: string
 	onSelectModel: (modelId: string) => void
 	onboardingModels: OnboardingModelsByGroup
@@ -65,9 +61,6 @@ type ModelSelectionProps = {
 }
 
 function getModelGroupKey(userType: ModelSelectionProps["userType"]): keyof OnboardingModelsByGroup {
-	if (userType === NEW_USER_TYPE.CLINE_PASS) {
-		return "clinePass"
-	}
 	return userType === NEW_USER_TYPE.FREE ? "free" : "power"
 }
 
@@ -80,10 +73,7 @@ const ModelSelection = ({
 	setSearchTerm,
 	onboardingModels,
 }: ModelSelectionProps) => {
-	const isClinePass = userType === NEW_USER_TYPE.CLINE_PASS
 	const modelGroups = onboardingModels[getModelGroupKey(userType)]
-	// ClinePass costs are covered by the subscription, so prices are hidden.
-	const hidePrice = isClinePass
 
 	const searchedModels = useMemo(() => {
 		if (!models || !searchTerm) {
@@ -114,7 +104,7 @@ const ModelSelection = ({
 							<Badge className="capitalize" variant="info">
 								{model.badge}
 							</Badge>
-						) : !hidePrice && model.info ? (
+						) : model.info ? (
 							<Badge>{getPriceRange(model.info)}</Badge>
 						) : null}
 					</ItemTitle>
@@ -140,7 +130,7 @@ const ModelSelection = ({
 										<span>Context: </span>
 										<span className="text-foreground/70">{(model?.info.contextWindow || 0) / 1000}k</span>
 									</div>
-									{!hidePrice && <Badge>{getPriceRange(model.info)}</Badge>}
+									<Badge>{getPriceRange(model.info)}</Badge>
 								</div>
 							)}
 						</div>
@@ -150,28 +140,13 @@ const ModelSelection = ({
 		)
 	}
 
-	// No curated ClinePass models available: show an empty state rather than other models.
-	if (isClinePass && modelGroups.length === 0) {
-		return (
-			<div className="flex w-full max-w-lg flex-col items-center justify-center my-8 px-2 text-center">
-				<p className="text-foreground text-sm m-0">No ClinePass models are available right now.</p>
-				<p className="text-foreground/70 text-sm mt-1">Please choose another option or try again later.</p>
-			</div>
-		)
-	}
-
 	return (
 		<div className="flex flex-col w-full items-center px-2">
 			<div className="flex w-full max-w-lg flex-col gap-6 my-4">
 				{modelGroups.map((group) => {
-					const isClinePassGroup = group.group === CLINEPASS_GROUP
 					return (
 						<div className="flex flex-col gap-3" key={group.group}>
-							<h4
-								className={cn(
-									"text-sm font-bold text-foreground/70 mb-2",
-									isClinePassGroup ? "normal-case" : "uppercase",
-								)}>
+							<h4 className="text-sm font-bold text-foreground/70 mb-2 uppercase">
 								{getOnboardingGroupDisplayName(group.group)}
 							</h4>
 							{group.models.map((model) => (
@@ -182,68 +157,66 @@ const ModelSelection = ({
 				})}
 			</div>
 
-			{/* SEARCH MODEL — hidden for ClinePass, whose selection is constrained to the curated list. */}
-			{!isClinePass && (
-				<div className="flex w-full max-w-lg flex-col gap-6 my-4 border-t border-muted-foreground">
-					<div className="flex flex-col gap-3 mt-6" key="search-results">
-						<h4 className="text-sm font-bold text-foreground/70 uppercase mb-2">other options</h4>
-						<Input
-							autoFocus={false}
-							className="focus-visible:border-button-background"
-							onChange={(e) => {
-								if (!e.target?.value) {
-									onSelectModel("")
+			{/* SEARCH MODEL */}
+			<div className="flex w-full max-w-lg flex-col gap-6 my-4 border-t border-muted-foreground">
+				<div className="flex flex-col gap-3 mt-6" key="search-results">
+					<h4 className="text-sm font-bold text-foreground/70 uppercase mb-2">other options</h4>
+					<Input
+						autoFocus={false}
+						className="focus-visible:border-button-background"
+						onChange={(e) => {
+							if (!e.target?.value) {
+								onSelectModel("")
+							}
+							setSearchTerm(e.target.value)
+						}}
+						onClick={() => onSelectModel("")}
+						placeholder="Search model..."
+						type="search"
+						value={searchTerm}
+					/>
+					<div className="w-full flex flex-col gap-3">
+						{searchTerm &&
+							searchedModels.map(([id, info]) => {
+								const isSelected = selectedModelId === id
+								const modelInfo: OpenRouterModelInfo = {
+									name: info.name,
+									maxTokens: info.maxTokens,
+									contextWindow: info.contextWindow,
+									supportsImages: info.supportsImages,
+									supportsPromptCache: info.supportsPromptCache,
+									inputPrice: info.inputPrice,
+									outputPrice: info.outputPrice,
+									cacheWritesPrice: info.cacheWritesPrice,
+									cacheReadsPrice: info.cacheReadsPrice,
+									description: info.description,
+									supportsGlobalEndpoint: info.supportsGlobalEndpoint,
+									thinkingConfig: info.thinkingConfig
+										? {
+												maxBudget: info.thinkingConfig.maxBudget,
+												outputPrice: info.thinkingConfig.outputPrice,
+												outputPriceTiers: info.thinkingConfig.outputPriceTiers || [],
+											}
+										: undefined,
+									tiers: info.tiers || [],
 								}
-								setSearchTerm(e.target.value)
-							}}
-							onClick={() => onSelectModel("")}
-							placeholder="Search model..."
-							type="search"
-							value={searchTerm}
-						/>
-						<div className="w-full flex flex-col gap-3">
-							{searchTerm &&
-								searchedModels.map(([id, info]) => {
-									const isSelected = selectedModelId === id
-									const modelInfo: OpenRouterModelInfo = {
-										name: info.name,
-										maxTokens: info.maxTokens,
-										contextWindow: info.contextWindow,
-										supportsImages: info.supportsImages,
-										supportsPromptCache: info.supportsPromptCache,
-										inputPrice: info.inputPrice,
-										outputPrice: info.outputPrice,
-										cacheWritesPrice: info.cacheWritesPrice,
-										cacheReadsPrice: info.cacheReadsPrice,
-										description: info.description,
-										supportsGlobalEndpoint: info.supportsGlobalEndpoint,
-										thinkingConfig: info.thinkingConfig
-											? {
-													maxBudget: info.thinkingConfig.maxBudget,
-													outputPrice: info.thinkingConfig.outputPrice,
-													outputPriceTiers: info.thinkingConfig.outputPriceTiers || [],
-												}
-											: undefined,
-										tiers: info.tiers || [],
-									}
-									const onboardingModel: OnboardingModel = {
-										id,
-										name: info.name || id,
-										info: modelInfo,
-										score: 0,
-										latency: 0,
-										badge: "",
-										group: "",
-									}
-									return <ModelItem id={id} isSelected={isSelected} key={id} model={onboardingModel} />
-								})}
-							{searchTerm.length > 0 && searchedModels.length === 0 && (
-								<p className="px-1 mt-1 text-sm text-foreground/70">No result found for "{searchTerm}"</p>
-							)}
-						</div>
+								const onboardingModel: OnboardingModel = {
+									id,
+									name: info.name || id,
+									info: modelInfo,
+									score: 0,
+									latency: 0,
+									badge: "",
+									group: "",
+								}
+								return <ModelItem id={id} isSelected={isSelected} key={id} model={onboardingModel} />
+							})}
+						{searchTerm.length > 0 && searchedModels.length === 0 && (
+							<p className="px-1 mt-1 text-sm text-foreground/70">No result found for "{searchTerm}"</p>
+						)}
 					</div>
 				</div>
-			)}
+			</div>
 		</div>
 	)
 }
@@ -336,7 +309,7 @@ const OnboardingStepContent = ({
 	if (step === 2) {
 		return null
 	}
-	if (userType === NEW_USER_TYPE.FREE || userType === NEW_USER_TYPE.POWER || userType === NEW_USER_TYPE.CLINE_PASS) {
+	if (userType === NEW_USER_TYPE.FREE || userType === NEW_USER_TYPE.POWER) {
 		return (
 			<ModelSelection
 				models={models}
@@ -356,8 +329,6 @@ const OnboardingStepContent = ({
 const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: OnboardingModelGroup }) => {
 	const { handleFieldsChange } = useApiConfigurationHandlers()
 	const { openRouterModels, hideSettings, hideAccount, setShowWelcome } = useExtensionState()
-	const { models: clineModels } = useProviderModels("cline")
-	const { commitSelection } = useProviderConfig("cline")
 	const loginAttemptIdRef = useRef(0)
 	const loginLoadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const viewedPageTelemetryKeysRef = useRef<Set<string>>(new Set())
@@ -370,12 +341,7 @@ const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: Onboard
 	const [searchTerm, setSearchTerm] = useState("")
 
 	const models = useMemo(() => getClineUIOnboardingGroups(onboardingModels), [onboardingModels])
-	// Gate on models so a fallback/empty response can't route users into the dead-end empty step.
-	const showClinePass = models.clinePass.length > 0
-	const userTypeSelections = useMemo(() => getUserTypeSelections(showClinePass), [showClinePass])
-	// ClinePass model IDs (e.g. "cline-pass/glm-5.2") aren't keyed in openRouterModels,
-	// so resolve their info via the slug-based lookup used by ClinePassProvider.
-	const openRouterModelsByName = useMemo(() => buildModelInfoNameMap(openRouterModels), [openRouterModels])
+	const userTypeSelections = useMemo(() => getUserTypeSelections(), [])
 	const onboardingModelById = useMemo(() => {
 		return new Map(onboardingModels.models.map((model) => [model.id, model]))
 	}, [onboardingModels])
@@ -383,10 +349,9 @@ const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: Onboard
 
 	useEffect(() => {
 		setSearchTerm("")
-		const groupKey = userType === NEW_USER_TYPE.CLINE_PASS ? "clinePass" : userType === NEW_USER_TYPE.POWER ? "power" : "free"
-		// ClinePass must stay within its curated list (never fall back to a free/OpenRouter model
-		// under the cline-pass provider). Free/Frontier fall back to free if their group is empty.
-		const modelGroup = userType === NEW_USER_TYPE.CLINE_PASS ? models[groupKey][0] : (models[groupKey][0] ?? models.free[0])
+		const groupKey = userType === NEW_USER_TYPE.POWER ? "power" : "free"
+		// Frontier falls back to free if its group is empty.
+		const modelGroup = models[groupKey][0] ?? models.free[0]
 		const userGroupInitModel = modelGroup?.models[0]
 		setSelectedModelId(userGroupInitModel?.id ?? "")
 	}, [userType, models])
@@ -447,50 +412,20 @@ const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: Onboard
 	const finishOnboarding = useCallback(
 		async (updateModelId: boolean, step: number, markCompleted = true) => {
 			const modelSelected = (updateModelId && selectedModelId) || undefined
-			// Guard: never save a non-ClinePass model id under the cline-pass provider.
-			const isClinePassModel = selectedModelId.startsWith("cline-pass/")
 			if (modelSelected) {
-				if (userType === NEW_USER_TYPE.CLINE_PASS && isClinePassModel) {
-					const clinePassModelInfo = resolveClinePassModelInfo(selectedModelId, openRouterModelsByName)
-					await handleFieldsChange({
-						planModeClinePassModelId: selectedModelId,
-						actModeClinePassModelId: selectedModelId,
-						planModeClinePassModelInfo: clinePassModelInfo,
-						actModeClinePassModelInfo: clinePassModelInfo,
-						planModeApiProvider: "cline-pass",
-						actModeApiProvider: "cline-pass",
-					})
-				} else if (userType !== NEW_USER_TYPE.CLINE_PASS) {
-					const selectedModelInfo = clineModels[selectedModelId] ??
-						onboardingModelById.get(selectedModelId)?.info ?? {
-							...openAiModelInfoSafeDefaults,
-							name: selectedModelId,
-						}
-
-					await Promise.all([
-						commitSelection("plan", {
-							providerId: "cline",
-							modelId: selectedModelId,
-						}),
-						commitSelection("act", {
-							providerId: "cline",
-							modelId: selectedModelId,
-						}),
-					])
-
-					await handleFieldsChange({
-						planModeClineModelId: selectedModelId,
-						actModeClineModelId: selectedModelId,
-						planModeClineModelInfo: selectedModelInfo,
-						actModeClineModelInfo: selectedModelInfo,
-						planModeApiProvider: "cline",
-						actModeApiProvider: "cline",
-					})
-				} else {
-					// ClinePass selected but the id isn't a cline-pass/ model: skip the write
-					// (avoids a bad provider config) and log so the no-op is observable.
-					console.error(`Skipped ClinePass provider setup: unexpected model id "${selectedModelId}"`)
+				const selectedModelInfo = onboardingModelById.get(selectedModelId)?.info ?? {
+					...openAiModelInfoSafeDefaults,
+					name: selectedModelId,
 				}
+
+				await handleFieldsChange({
+					planModeApiProvider: "openrouter",
+					actModeApiProvider: "openrouter",
+					planModeOpenRouterModelId: selectedModelId,
+					actModeOpenRouterModelId: selectedModelId,
+					planModeOpenRouterModelInfo: selectedModelInfo,
+					actModeOpenRouterModelInfo: selectedModelInfo,
+				})
 			}
 
 			if (markCompleted) {
@@ -508,19 +443,7 @@ const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: Onboard
 				completed: true,
 			})
 		},
-		[
-			hideAccount,
-			hideSettings,
-			handleFieldsChange,
-			selectedModelId,
-			openRouterModels,
-			openRouterModelsByName,
-			clineModels,
-			onboardingModelById,
-			commitSelection,
-			setShowWelcome,
-			userType,
-		],
+		[hideAccount, hideSettings, handleFieldsChange, selectedModelId, onboardingModelById, setShowWelcome, userType],
 	)
 
 	const loginAndFinishOnboarding = useCallback(
@@ -578,15 +501,11 @@ const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: Onboard
 
 			switch (action) {
 				case "signup":
-					// ClinePass: record the intent so App opens the subscription page once auth
-					// completes (App outlives this view, which unmounts on auth). Login flow unchanged.
-					setPendingClinePassSubscribe(userType === NEW_USER_TYPE.CLINE_PASS)
 					captureNavigation("signup_clicked", stepNumber + 1)
 					setStepNumber(stepNumber + 1)
 					await loginAndFinishOnboarding(true, stepNumber + 1)
 					break
 				case "signin":
-					setPendingClinePassSubscribe(false)
 					captureNavigation("signin_clicked")
 					await loginAndFinishOnboarding(true, stepNumber)
 					break
@@ -595,8 +514,6 @@ const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: Onboard
 					setStepNumber(stepNumber + 1)
 					break
 				case "back":
-					// Abandon any pending ClinePass subscription redirect when the user goes back.
-					setPendingClinePassSubscribe(false)
 					captureNavigation("back_clicked", stepNumber - 1)
 					setStepNumber(stepNumber - 1)
 					break
@@ -632,7 +549,7 @@ const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: Onboard
 
 				<div className="flex-1 w-full flex max-w-lg overflow-y-auto min-h-0">
 					<OnboardingStepContent
-						models={Object.keys(clineModels).length > 0 ? clineModels : openRouterModels}
+						models={openRouterModels}
 						onboardingModels={models}
 						onSelectModel={onModelClick}
 						onSelectUserType={onUserTypeClick}
@@ -647,12 +564,9 @@ const OnboardingViewContent = ({ onboardingModels }: { onboardingModels: Onboard
 
 				<footer className="flex w-full max-w-lg flex-col gap-3 my-2 px-2 overflow-hidden flex-shrink-0">
 					{stepDisplayInfo.buttons.map((btn) => {
-						// Block ClinePass signup when no ClinePass model is selected (e.g. empty list).
 						const isLoginAction = btn.action === "signin" || btn.action === "signup"
 						const showSpinner = isActionLoading && isLoginAction
-						const disabled =
-							isActionLoading ||
-							(btn.action === "signup" && userType === NEW_USER_TYPE.CLINE_PASS && !selectedModelId)
+						const disabled = isActionLoading
 						return (
 							<Button
 								className={`w-full rounded-xs ${isActionLoading ? "animate-pulse" : ""}`}

@@ -46,7 +46,11 @@ describe("OAuth refresh across processes", () => {
 		const script = `
 			import { appendFileSync, existsSync } from "node:fs";
 			import { setTimeout } from "node:timers/promises";
-			import { RuntimeOAuthTokenManager, ProviderSettingsManager } from ${JSON.stringify(entry)};
+			import {
+				createClineAccountAuthHandler,
+				RuntimeOAuthTokenManager,
+				ProviderSettingsManager,
+			} from ${JSON.stringify(entry)};
 			const [path, log, release] = process.argv.slice(1);
 			globalThis.fetch = async () => {
 				appendFileSync(log, "refresh\\n");
@@ -58,8 +62,14 @@ describe("OAuth refresh across processes", () => {
 					userInfo: { clineUserId: "account-a", email: "", subject: null, name: "", accounts: [] }
 				} });
 			};
+			// Cloud account credentials are not in the local provider auth
+			// registry: create the handler explicitly and inject it into the
+			// manager, mirroring the hub/sidecar wiring.
+			const authHandler = createClineAccountAuthHandler();
 			const manager = new RuntimeOAuthTokenManager({
-				providerSettingsManager: new ProviderSettingsManager({ filePath: path })
+				providerSettingsManager: new ProviderSettingsManager({ filePath: path }),
+				resolveAuthHandler: (providerId) =>
+					providerId === authHandler.providerId ? authHandler : undefined
 			});
 			console.log("resolving");
 			const result = await manager.resolveProviderApiKey({ providerId: "cline" });

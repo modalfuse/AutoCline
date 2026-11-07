@@ -4,7 +4,6 @@ import {
 	isClineModelNotFoundMessage,
 	isClineNotSubscribedMessage,
 	isClineOrgIndividualInferenceSubscriptionMessage,
-	isClinePassLimitMessage,
 } from "@cline/llms"
 import { serializeError } from "serialize-error"
 import { CLINE_ACCOUNT_AUTH_ERROR_MESSAGE } from "../../shared/ClineAccount"
@@ -17,7 +16,6 @@ export enum ClineErrorType {
 	QuotaExceeded = "quotaExceeded",
 	Entitlement = "entitlement",
 	OrgClinePassRestriction = "orgClinePassRestriction",
-	ClinePassLimit = "clinePassLimit",
 	ClineFreeModelLimit = "clineFreeModelLimit",
 	ClineFreePromotionEnded = "clineFreePromotionEnded",
 	/** HTTP 404/405/410: the model id or endpoint path does not exist on the server. */
@@ -230,13 +228,6 @@ export class ClineError extends Error {
 			(rawMessage ? isClineFreeModelLimitMessage(rawMessage) : false)
 		) {
 			return ClineErrorType.ClineFreeModelLimit
-		}
-
-		if (
-			(detailMessage ? isClinePassLimitMessage(detailMessage) : false) ||
-			(rawMessage ? isClinePassLimitMessage(rawMessage) : false)
-		) {
-			return ClineErrorType.ClinePassLimit
 		}
 
 		// Retired free models must be classified before the status branch: the

@@ -32,3 +32,27 @@ export function preferCanonicalModelIds<T>(
 		}),
 	);
 }
+
+/**
+ * Ensure every alias id in the catalog also exists under its canonical id.
+ * A feed that only carries `z-ai/…` otherwise leaves the canonical `zai/…`
+ * id unknown, so the picker offers a model the backend cannot route and
+ * exact model-info lookups miss its limits. The canonical entry wins over the
+ * listed alias so both ids resolve to identical metadata.
+ */
+export function addCanonicalModelIdAliases<T>(
+	models: Record<string, T>,
+	rules: readonly ModelIdAliasRule[],
+): Record<string, T> {
+	const additions: Record<string, T> = {};
+	for (const [modelId, model] of Object.entries(models)) {
+		for (const rule of rules) {
+			if (!modelId.startsWith(rule.aliasPrefix)) continue;
+			const canonicalModelId = `${rule.canonicalPrefix}${modelId.slice(rule.aliasPrefix.length)}`;
+			if (!(canonicalModelId in models)) {
+				additions[canonicalModelId] = model;
+			}
+		}
+	}
+	return { ...additions, ...models };
+}

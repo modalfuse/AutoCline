@@ -67,15 +67,6 @@ export class SdkTaskControlCoordinator {
 		return () => generation !== this.taskViewGeneration
 	}
 
-	async cancelClineTaskOnSignOut(isClineManagedProvider: boolean): Promise<void> {
-		const activeSession = this.options.sessions.getActiveSession()
-		if (!isClineManagedProvider || !activeSession?.isRunning || "isCloud" in activeSession.sdkHost) {
-			return
-		}
-
-		await this.cancelTask()
-	}
-
 	async cancelTask(): Promise<void> {
 		this.options.interactions.clearPending("Task cancelled")
 

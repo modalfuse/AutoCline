@@ -5,7 +5,7 @@ import type {
 	PendingPromptSnapshot,
 	PendingPromptSubmittedEvent,
 } from "../../runtime/session-events";
-import { formatCliErrorMessage } from "../../utils/cline-pass-errors";
+import { formatCliErrorMessage } from "../../utils/errors";
 import { resolveNonCompactionStatusLabel } from "../../utils/events";
 import { materializeGeneratedMedia } from "../../utils/generated-media";
 import {
@@ -246,7 +246,7 @@ export function useAgentEventHandlers(deps: AgentEventDeps) {
 						if (verbose) {
 							appendEntry({
 								kind: "error",
-								text: formatCliErrorMessage(event.error, { modelId }),
+								text: formatCliErrorMessage(event.error),
 							});
 						}
 						break;
@@ -260,7 +260,7 @@ export function useAgentEventHandlers(deps: AgentEventDeps) {
 					onTurnErrorReported(true);
 					appendEntry({
 						kind: "error",
-						text: formatCliErrorMessage(event.error, { modelId }),
+						text: formatCliErrorMessage(event.error),
 					});
 					break;
 				case "notice":

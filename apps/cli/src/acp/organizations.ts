@@ -12,10 +12,6 @@ export const PERSONAL_ACCOUNT_VALUE = "personal";
 
 export const ORGANIZATION_CONFIG_ID = "organization";
 
-export function usesClineAccount(providerId: string): boolean {
-	return providerId === "cline" || providerId === "cline-pass";
-}
-
 export interface AcpOrganizationState {
 	organizations: ClineAccountOrganization[];
 	/** Active organization id, or null when the personal account is active. */

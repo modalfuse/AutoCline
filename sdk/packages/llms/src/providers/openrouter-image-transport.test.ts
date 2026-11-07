@@ -35,14 +35,12 @@ describe("OpenRouter image transport", () => {
 				return Response.json(
 					{
 						success: true,
-						data: {
-							created: 1,
-							data: [{ b64_json: imageBase64 }],
-							usage: {
-								prompt_tokens: 1,
-								completion_tokens: 1,
-								total_tokens: 2,
-							},
+						created: 1,
+						data: [{ b64_json: imageBase64 }],
+						usage: {
+							prompt_tokens: 1,
+							completion_tokens: 1,
+							total_tokens: 2,
 						},
 					},
 					{
@@ -55,7 +53,8 @@ describe("OpenRouter image transport", () => {
 		const gateway = createGateway({
 			providerConfigs: [
 				{
-					providerId: "cline",
+					providerId: "openrouter",
+					baseUrl: "https://images.example.com/api/v1",
 					apiKey: "test",
 					fetch: fetchMock as typeof fetch,
 					models: [
@@ -75,7 +74,7 @@ describe("OpenRouter image transport", () => {
 
 		const events = await collect(
 			await gateway.stream({
-				providerId: "cline",
+				providerId: "openrouter",
 				modelId: "google/gemini-image-test",
 				messages,
 			}),
@@ -83,7 +82,7 @@ describe("OpenRouter image transport", () => {
 
 		expect(fetchMock).toHaveBeenCalledOnce();
 		expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-			"https://api.cline.bot/api/v1/images",
+			"https://images.example.com/api/v1/images",
 		);
 		expect(requestBody).toMatchObject({
 			model: "google/gemini-image-test",
@@ -141,7 +140,8 @@ describe("OpenRouter image transport", () => {
 		const gateway = createGateway({
 			providerConfigs: [
 				{
-					providerId: "cline",
+					providerId: "openrouter",
+					baseUrl: "https://images.example.com/api/v1",
 					apiKey: "test",
 					fetch: fetchMock as typeof fetch,
 					models: [
@@ -160,14 +160,14 @@ describe("OpenRouter image transport", () => {
 
 		const events = await collect(
 			await gateway.stream({
-				providerId: "cline",
+				providerId: "openrouter",
 				modelId,
 				messages,
 			}),
 		);
 
 		expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-			"https://api.cline.bot/api/v1/chat/completions",
+			"https://images.example.com/api/v1/chat/completions",
 		);
 		expect(responseTextSpy).not.toHaveBeenCalled();
 		expect(events).toContainEqual({

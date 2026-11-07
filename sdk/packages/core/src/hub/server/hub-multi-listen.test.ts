@@ -38,21 +38,21 @@ describe("startHubWebSocketServer multi-address listen", () => {
 		const server = await startHubWebSocketServer({
 			host: "127.0.0.1",
 			port,
-			listenHosts: ["127.0.0.1", "127.0.0.2"],
+			listenHosts: ["127.0.0.1", "::1"],
 			pathname: "/hub",
 			eventLog: false,
 			runQueue: false,
 			runtimeHandlers,
 		});
 		try {
-			expect(server.listenHosts).toEqual(["127.0.0.1", "127.0.0.2"]);
+			expect(server.listenHosts).toEqual(["127.0.0.1", "::1"]);
 			expect(server.urls).toEqual([
 				`ws://127.0.0.1:${port}/hub`,
-				`ws://127.0.0.2:${port}/hub`,
+				`ws://[::1]:${port}/hub`,
 			]);
 			// Both addresses serve the same listener.
 			expect(await health("127.0.0.1", port)).toMatchObject({ ok: true });
-			expect(await health("127.0.0.2", port)).toMatchObject({ ok: true });
+			expect(await health("[::1]", port)).toMatchObject({ ok: true });
 		} finally {
 			await server.close();
 		}

@@ -16,12 +16,9 @@ import {
 export type OnboardingStep =
 	| "menu"
 	| "oauth_pending"
-	| "device_code"
 	| "byo_provider"
 	| "byo_apikey"
 	| "local_cli_setup"
-	| "cline_pass_subscription"
-	| "cline_model"
 	| "model_picker"
 	| "custom_model_id"
 	| "thinking_level"
@@ -53,30 +50,7 @@ export interface MenuOption {
 	icon: string;
 }
 
-export type ClinePassSubscriptionAction =
-	| "subscribe"
-	| "refresh"
-	| "skip"
-	| "back";
-
-export interface ClinePassSubscriptionOption {
-	value: ClinePassSubscriptionAction;
-	label: string;
-}
-
 export const MAIN_MENU: MenuOption[] = [
-	{
-		label: "Sign in with Cline",
-		value: "cline",
-		detail: "Latest models with regular free promos",
-		icon: "\u263a",
-	},
-	{
-		label: "Sign in with ClinePass",
-		value: "cline-pass",
-		detail: "Low cost subscription for everyone",
-		icon: "\u2726",
-	},
 	{
 		label: "Sign in with ChatGPT",
 		value: "openai-codex",
@@ -120,33 +94,6 @@ export function canContinueLocalCliSetup(
 	return true;
 }
 
-export function getMainMenuOptions(options?: {
-	isClinePassEnabled?: boolean;
-}): MenuOption[] {
-	return MAIN_MENU.filter(
-		(option) => option.value !== "cline-pass" || options?.isClinePassEnabled,
-	);
-}
-
-export const CLINE_PASS_SUBSCRIPTION_OPTIONS: ClinePassSubscriptionOption[] = [
-	{
-		value: "subscribe",
-		label: "Subscribe to ClinePass",
-	},
-	{
-		value: "refresh",
-		label: "Re-check subscription status",
-	},
-	{
-		value: "skip",
-		label: "Skip for now",
-	},
-	{
-		value: "back",
-		label: "Go back",
-	},
-];
-
 export interface OnboardingResult {
 	providerId: string;
 	modelId: string;
@@ -171,12 +118,6 @@ export interface ModelEntry {
 	name: string;
 	supportsReasoning: boolean;
 }
-
-export type ClinePassSubscriptionStatus =
-	| "loading"
-	| "subscribed"
-	| "unsubscribed"
-	| "error";
 
 export interface ProviderCatalogItem {
 	id: string;
@@ -247,19 +188,8 @@ export function toModelEntriesFromKnownModels(
 }
 
 export function getOAuthProviderLabel(providerId: string): string {
-	if (providerId === "cline-pass") {
-		return "ClinePass";
-	}
-	if (providerId === "cline") {
-		return "Cline";
-	}
 	if (providerId === "openai-codex") {
 		return "ChatGPT";
 	}
 	return providerId;
-}
-
-export function shouldUseFeaturedClineModelPicker(providerId: string): boolean {
-	// ClinePass uses the featured picker too, with Subscribed/Free sections
-	return providerId === "cline" || providerId === "cline-pass";
 }

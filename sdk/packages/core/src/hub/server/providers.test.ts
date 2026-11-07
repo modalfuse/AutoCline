@@ -6,7 +6,6 @@ import type { HubReplyEnvelope } from "@cline/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { LocalRuntimeHost } from "../../runtime/host/local-runtime-host";
-import { resetClineRecommendedModelsCacheForTests } from "../../services/llms/cline-recommended-models";
 import { clearLiveModelsCatalogCache } from "../../services/llms/provider-defaults";
 import * as ProviderRegistry from "../../services/providers/local-provider-registry";
 import { ProviderSettingsManager } from "../../services/storage/provider-settings-manager";
@@ -83,7 +82,6 @@ afterEach(async () => {
 	} finally {
 		vi.restoreAllMocks();
 		clearLiveModelsCatalogCache();
-		resetClineRecommendedModelsCacheForTests();
 		vi.unstubAllGlobals();
 		vi.unstubAllEnvs();
 		await rm(root, { recursive: true, force: true });
@@ -218,7 +216,7 @@ describe("hub provider management", () => {
 	it.each([
 		"cline",
 		"cline-pass",
-	])("replaces shared OAuth credentials when pasting a %s key", async (providerId) => {
+	])("stores an independent manual key for %s without disturbing the shared cloud cline account", async (providerId) => {
 		const manager = new ProviderSettingsManager();
 		manager.saveProviderSettings({
 			provider: "cline",
@@ -229,17 +227,25 @@ describe("hub provider management", () => {
 			},
 		});
 		await api.saveSettings({ providerId, apiKey: "manual-key" });
+		// The manual key lands on the requested id only: no implicit
+		// `cline-pass` -> `cline` alias when the id is the local one.
 		expect(
-			new ProviderSettingsManager().getProviderSettings("cline"),
-		).toMatchObject({ apiKey: "manual-key" });
+			new ProviderSettingsManager().getProviderSettings(providerId)?.apiKey,
+		).toBe("manual-key");
+		// The shared cloud cline account keeps its OAuth sign-in untouched.
 		expect(
-			new ProviderSettingsManager().getProviderSettings("cline")?.auth
-				?.accessToken,
-		).toBeUndefined();
-		expect(
-			new ProviderSettingsManager().getProviderSettings("cline")?.auth
-				?.accountId,
-		).toBeUndefined();
+			new ProviderSettingsManager().getProviderSettings("cline")?.auth,
+		).toMatchObject({
+			accessToken: "token",
+			refreshToken: "refresh",
+			accountId: "account",
+		});
+		// The local id never absorbs the cloud cline API key.
+		if (providerId !== "cline") {
+			expect(
+				new ProviderSettingsManager().getProviderSettings(providerId)?.auth,
+			).toBeUndefined();
+		}
 	});
 
 	it("preserves key-only account identity when saving a key again", async () => {
@@ -355,7 +361,6 @@ describe("hub provider management", () => {
 			for (const name of [
 				"providers.list",
 				"providers.models.list",
-				"providers.models.recommended",
 				"providers.settings.save",
 				"providers.add",
 				"providers.models.update",
@@ -415,18 +420,18 @@ describe("hub provider management", () => {
 		}
 	});
 
-	it("includes cloud-only models only when requested", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async (input: string | URL | Request) => {
-				if (String(input) === "https://models.dev/api.json")
-					return Response.json({});
-				return Response.json({
-					clineCloud: [{ id: "cline-cloud/cloud-only", name: "Cloud Only" }],
-				});
-			}),
-		);
+	it("keeps the unregistered local cline listing empty for both cloud modes", async () => {
+		const fetchMock = vi.fn(async (input: string | URL | Request) => {
+			if (String(input) === "https://models.dev/api.json")
+				return Response.json({});
+			return Response.json({
+				clineCloud: [{ id: "cline-cloud/cloud-only", name: "Cloud Only" }],
+			});
+		});
+		vi.stubGlobal("fetch", fetchMock);
 		const local = await api.listModels({ providerId: "cline" });
+		// The local registry has no `cline` collection, so the list stays empty.
+		expect(local).toMatchObject({ providerId: "cline", models: [] });
 		expect(
 			local.models.some((model) => model.id.startsWith("cline-cloud/")),
 		).toBe(false);
@@ -434,8 +439,15 @@ describe("hub provider management", () => {
 			providerId: "cline",
 			includeCloudModels: true,
 		});
-		expect(cloud.models).toContainEqual(
-			expect.objectContaining({ id: "cline-cloud/cloud-only" }),
+		// Requesting cloud models must not resurrect a public catalog for a
+		// provider the local registry does not own; the cloud catalog is a
+		// separate service.
+		expect(cloud).toMatchObject({ providerId: "cline", models: [] });
+		expect(
+			cloud.models.some((model) => model.id.startsWith("cline-cloud/")),
+		).toBe(false);
+		expect(fetchMock).not.toHaveBeenCalledWith(
+			expect.stringContaining("cline-cloud"),
 		);
 	});
 
@@ -484,39 +496,41 @@ describe("hub provider management", () => {
 		expect(settings?.aws).toEqual({ region: "us-east-1" });
 	});
 
-	it("clears shared Cline Pass credentials and legacy secrets on disable", async () => {
+	it("disables only the unrelated local cline-pass and preserves shared cloud credentials", async () => {
 		const manager = new ProviderSettingsManager();
 		manager.saveProviderSettings({
 			provider: "cline",
 			apiKey: "secret",
 			auth: { accountId: "account", accessToken: "token" },
 		});
+		const legacySecrets = {
+			"cline:clineAccountId": "legacy",
+			clineApiKey: "legacy-key",
+			unrelated: "keep",
+		};
 		await writeFile(
 			join(root, "secrets.json"),
-			JSON.stringify({
-				"cline:clineAccountId": "legacy",
-				clineApiKey: "legacy-key",
-				unrelated: "keep",
-			}),
+			JSON.stringify(legacySecrets),
 		);
 		expect(
 			await api.saveSettings({ providerId: "cline-pass", enabled: false }),
-		).toMatchObject({ enabled: false, clineCredentialsChanged: true });
+		).toMatchObject({ enabled: false, clineCredentialsChanged: false });
+		// The shared cloud cline account is a different provider id, so
+		// disabling the local one must not clear it.
 		expect(
 			new ProviderSettingsManager().getProviderSettings("cline"),
-		).toBeUndefined();
+		).toMatchObject({
+			apiKey: "secret",
+			auth: { accountId: "account", accessToken: "token" },
+		});
+		// Legacy VS Code secrets belong to the cloud cline account too.
 		expect(
 			JSON.parse(await readFile(join(root, "secrets.json"), "utf8")),
-		).toEqual({ unrelated: "keep" });
-	});
-
-	it("returns recommended models with the offline fallback", async () => {
-		const result = await api.recommendedModels();
-		expect(result.recommended.length).toBeGreaterThan(0);
-		expect(result).toMatchObject({
-			free: expect.any(Array),
-			clinePass: expect.any(Array),
-		});
+		).toEqual(legacySecrets);
+		// The disabled local id itself is gone from persisted settings.
+		expect(
+			new ProviderSettingsManager().getProviderSettings("cline-pass"),
+		).toBeUndefined();
 	});
 
 	it("rejects invalid writes before changing persisted settings", async () => {

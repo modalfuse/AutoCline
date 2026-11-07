@@ -21,8 +21,8 @@ const providerModels = {
 };
 
 const providerOptions = [
-	{ value: "cline", name: "Cline" },
 	{ value: "openrouter", name: "OpenRouter" },
+	{ value: "anthropic", name: "Anthropic" },
 ];
 
 const organizationOption: SessionConfigOption = {
@@ -36,18 +36,18 @@ const organizationOption: SessionConfigOption = {
 
 describe("buildProviderConfigOption", () => {
 	it("builds the provider selector from the current provider", () => {
-		const option = buildProviderConfigOption("cline", providerOptions);
+		const option = buildProviderConfigOption("openrouter", providerOptions);
 
 		expect(option).toMatchObject({
 			type: "select",
 			id: "provider",
-			currentValue: "cline",
+			currentValue: "openrouter",
 			options: providerOptions,
 		});
 	});
 
 	it("uses a custom category instead of a spec-reserved one", () => {
-		const option = buildProviderConfigOption("cline", providerOptions);
+		const option = buildProviderConfigOption("openrouter", providerOptions);
 
 		expect(option.category).toBe(PROVIDER_CONFIG_CATEGORY);
 		expect(ACP_RESERVED_CATEGORIES).not.toContain(option.category);
@@ -60,7 +60,7 @@ describe.each([
 	true,
 ])("ACP config options (organization: %s)", (includeOrganization) => {
 	const options = buildConfigOptions({
-		currentProviderId: "cline",
+		currentProviderId: "openrouter",
 		providerOptions,
 		currentModelId: "anthropic/claude-sonnet-5.5",
 		providerModels,

@@ -27,7 +27,6 @@ export function createHubProvidersApi(client: Pick<NodeHubClient, "command">) {
 			command("providers.list", input),
 		listModels: (input: HubCommandInput<"providers.models.list">) =>
 			command("providers.models.list", input),
-		recommendedModels: () => command("providers.models.recommended", {}),
 		saveSettings: (input: HubCommandInput<"providers.settings.save">) =>
 			command("providers.settings.save", input),
 		add: (input: HubCommandInput<"providers.add">) =>

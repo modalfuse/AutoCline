@@ -15,7 +15,7 @@ it("finds SSH helpers in the installed Windows resource layout", () => {
 		writeFileSync(helper, "helper");
 		expect(
 			resolveDesktopRemoteHelper(target, {
-				execPath: join(root, "cline-cli.exe"),
+				execPath: join(root, "autocline-cli.exe"),
 				cwd: tmpdir(),
 				env: {},
 			}),
@@ -34,7 +34,9 @@ it("uses the bundled universal macOS CLI for Mac remotes", () => {
 	try {
 		const macOS = join(root, "Cline.app", "Contents", "MacOS");
 		mkdirSync(macOS, { recursive: true });
-		const cli = join(macOS, "cline-cli");
+		// The bundled Hub runtime carries the AutoCline name so it can never
+		// replace the official Cline CLI on the same machine.
+		const cli = join(macOS, "autocline-cli");
 		writeFileSync(cli, FAT_MACHO_HEADER);
 		for (const arch of ["arm64", "x64"] as const) {
 			expect(
@@ -70,7 +72,7 @@ it("only offers a thin bundled macOS CLI to Mac remotes of its own architecture"
 	try {
 		const macOS = join(root, "Cline.app", "Contents", "MacOS");
 		mkdirSync(macOS, { recursive: true });
-		const cli = join(macOS, "cline-cli");
+		const cli = join(macOS, "autocline-cli");
 		writeFileSync(cli, THIN_ARM64_MACHO_HEADER);
 		const options = {
 			execPath: cli,
@@ -97,7 +99,7 @@ it("uses the compiled CLI for Mac remotes under tauri dev on macOS", () => {
 	try {
 		const bin = join(root, "src-tauri", "bin");
 		mkdirSync(bin, { recursive: true });
-		const cli = join(bin, "cline-cli-aarch64-apple-darwin");
+		const cli = join(bin, "autocline-cli-aarch64-apple-darwin");
 		writeFileSync(cli, "cli");
 		const options = {
 			execPath: "/usr/local/bin/bun",
@@ -149,7 +151,7 @@ it("selects only the running Linux channels SSH helpers", () => {
 		);
 		expect(
 			resolveDesktopRemoteHelper(target, {
-				execPath: join(root, "usr", "bin", "cline-cli"),
+				execPath: join(root, "usr", "bin", "autocline-cli"),
 				cwd: tmpdir(),
 				env: { CLINE_REMOTE_HELPER_DIRECTORY: directory },
 			}),
@@ -158,7 +160,7 @@ it("selects only the running Linux channels SSH helpers", () => {
 		rmSync(helper);
 		expect(
 			resolveDesktopRemoteHelper(target, {
-				execPath: join(root, "usr", "bin", "cline-cli"),
+				execPath: join(root, "usr", "bin", "autocline-cli"),
 				cwd: tmpdir(),
 				env: { CLINE_REMOTE_HELPER_DIRECTORY: directory },
 			}),

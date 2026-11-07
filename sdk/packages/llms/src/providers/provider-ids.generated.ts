@@ -49,7 +49,6 @@ export const GENERATED_PROVIDER_IDS = [
 	"chutes",
 	"clarifai",
 	"claudinio",
-	"cline-pass",
 	"cloudferro-sherlock",
 	"cloudflare-workers-ai",
 	"commandcode",

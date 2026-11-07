@@ -1,4 +1,3 @@
-import { getProviderAuthStorageId } from "@cline/core"
 import { createModeSwitchNoticeTracker, type ModeSwitchNotice, type ModeSwitchNoticeTracker } from "@cline/shared"
 import type { ChatContent } from "@shared/ChatContent"
 import type { ClineMessage, TurnPhase } from "@shared/ExtensionMessage"
@@ -19,10 +18,6 @@ type StartInput = Parameters<VscodeSessionHost["start"]>[0]
 type InitialMessages = StartInput["initialMessages"]
 type SessionConfig = Awaited<ReturnType<SdkSessionConfigBuilder["build"]>>
 
-function usesClineAccountAuth(providerId: string): boolean {
-	return getProviderAuthStorageId(providerId) === "cline"
-}
-
 export { ACT_MODE_CONTINUATION_PROMPT }
 
 export interface SdkModeCoordinatorOptions {
@@ -35,7 +30,6 @@ export interface SdkModeCoordinatorOptions {
 	getWorkspaceRoot: () => Promise<string>
 	loadInitialMessages: (sdkHost: SdkSessionHost, sessionId: string) => Promise<unknown[]>
 	buildStartSessionInput: (config: SessionConfig, input: { cwd: string; mode: Mode }) => StartInput
-	emitClineAuthError: () => void
 	resetMessageTranslator: () => void
 	postStateToWebview: () => Promise<void>
 	/** Authoritative phase of the current turn, from the controller's TurnStateTracker. */
@@ -267,18 +261,6 @@ export class SdkModeCoordinator {
 			)
 			config.sessionId = oldSessionId
 
-			if (usesClineAccountAuth(config.providerId) && !config.apiKey) {
-				Logger.warn(
-					`[SdkController] Mode rebuild: new mode '${newMode}' provider is '${config.providerId}' but no Cline auth token - emitting auth error`,
-				)
-				// The session still runs with the old mode's tools, so roll the
-				// setting back to keep the UI toggle coherent with it.
-				this.options.stateManager.setGlobalState("mode", previousMode)
-				this.options.emitClineAuthError()
-				await this.options.postStateToWebview()
-				return false
-			}
-
 			const startInput = this.options.buildStartSessionInput(config, {
 				cwd,
 				mode: newMode,
@@ -293,9 +275,9 @@ export class SdkModeCoordinator {
 				// Replacement was refused. When the session we tried to replace is
 				// still the active one (e.g. a queued turn started running in the
 				// meantime), it still has the previous mode's tools, so roll the
-				// setting back — same reasoning as the auth guard above. When another
-				// session took over (or none is left), the superseding flow owns the
-				// mode now and the setting must not be clobbered.
+				// setting back so the toggle stays coherent with the running session.
+				// When another session took over (or none is left), the superseding
+				// flow owns the mode now and the setting must not be clobbered.
 				if (this.options.sessions.getActiveSession() === activeSession) {
 					this.options.stateManager.setGlobalState("mode", previousMode)
 				}

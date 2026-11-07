@@ -1,20 +1,9 @@
-import {
-	decodeJwtPayload,
-	getClineEnvironmentConfig,
-	type ITelemetryService,
-} from "@cline/shared";
+import { decodeJwtPayload, type ITelemetryService } from "@cline/shared";
 import type { ProviderSettingsManager } from "../services/storage/provider-settings-manager";
 import type { ProviderSettings } from "../types/provider-settings";
-import {
-	type ClineOAuthCredentials,
-	getValidClineCredentials,
-	loginClineOAuth,
-} from "./cline";
 import { getValidOpenAICodexCredentials, loginOpenAICodex } from "./codex";
 import { getValidOcaCredentials, loginOcaOAuth } from "./oca";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "./types";
-
-const WORKOS_TOKEN_PREFIX = "workos:";
 
 export type ProviderOAuthCredentials = OAuthCredentials;
 
@@ -50,20 +39,6 @@ export interface ProviderAuthHandler {
 	saveCredentials(input: ProviderAuthSaveCredentialsInput): ProviderSettings;
 	isConfigured(settings: ProviderSettings | undefined): boolean;
 	normalizeStoredAccessToken?(accessToken: string): string;
-}
-
-function formatClineApiKey(accessToken: string): string {
-	const token = accessToken.trim();
-	return token.toLowerCase().startsWith(WORKOS_TOKEN_PREFIX)
-		? token
-		: `${WORKOS_TOKEN_PREFIX}${token}`;
-}
-
-function stripClineApiKeyPrefix(accessToken: string): string {
-	const token = accessToken.trim();
-	return token.toLowerCase().startsWith(WORKOS_TOKEN_PREFIX)
-		? token.slice(WORKOS_TOKEN_PREFIX.length)
-		: token;
 }
 
 function readExpiryFromToken(accessToken: string): number | null {
@@ -210,42 +185,7 @@ function createOAuthHandler(input: {
 	};
 }
 
-function createClineAuthHandler(input: {
-	providerId: string;
-	storageProviderId?: string;
-}): ProviderAuthHandler {
-	return createOAuthHandler({
-		providerId: input.providerId,
-		storageProviderId: input.storageProviderId,
-		formatAccessToken: formatClineApiKey,
-		normalizeStoredAccessToken: stripClineApiKeyPrefix,
-		login: ({ settings, callbacks, telemetry }) =>
-			loginClineOAuth({
-				apiBaseUrl:
-					settings?.baseUrl?.trim() || getClineEnvironmentConfig().apiBaseUrl,
-				useWorkOSDeviceAuth: true,
-				callbacks,
-				telemetry,
-			}),
-		refresh: ({ settings, credentials, forceRefresh, telemetry }) =>
-			getValidClineCredentials(
-				credentials as ClineOAuthCredentials,
-				{
-					apiBaseUrl:
-						settings.baseUrl?.trim() || getClineEnvironmentConfig().apiBaseUrl,
-					telemetry,
-				},
-				{ forceRefresh },
-			),
-	});
-}
-
 const providerAuthHandlers = [
-	createClineAuthHandler({ providerId: "cline" }),
-	createClineAuthHandler({
-		providerId: "cline-pass",
-		storageProviderId: "cline",
-	}),
 	createOAuthHandler({
 		providerId: "oca",
 		login: ({ settings, callbacks, telemetry }) =>
@@ -271,6 +211,15 @@ const providerAuthHandlers = [
 			getValidOpenAICodexCredentials(credentials, { forceRefresh, telemetry }),
 	}),
 ] as const satisfies readonly ProviderAuthHandler[];
+
+/**
+ * Minimal factory/helper exposure for callers that need handlers which are
+ * NOT part of the local provider auth registry (for example the cloud account
+ * handler in `cline-account.ts`). Exposing these helpers does not register any
+ * provider; `providerAuthHandlers` above remains the single source of truth
+ * for local OAuth providers.
+ */
+export { createCredentialsFromSettings, createOAuthHandler };
 
 const providerAuthHandlerById = new Map<string, ProviderAuthHandler>(
 	providerAuthHandlers.map((handler) => [handler.providerId, handler]),

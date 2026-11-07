@@ -66,6 +66,13 @@ export default defineConfig({
 				replacement: path.resolve(__dirname, "node_modules/@cline/shared/dist/storage/index.js"),
 			},
 			{ find: "@cline/shared/db", replacement: path.resolve(__dirname, "node_modules/@cline/shared/dist/db/index.js") },
+			// `@cline/shared/node` is the package's Node-only entrypoint
+			// (package.json exports "./node" -> ./dist/node.js). SDK packages such as
+			// @cline/core's dist/cloud/index.js import it directly, so it needs the
+			// same explicit subpath mapping as storage/db; the bare alias below
+			// would otherwise rewrite it to dist/index.js and the Node-specific
+			// module would be missing.
+			{ find: "@cline/shared/node", replacement: path.resolve(__dirname, "node_modules/@cline/shared/dist/node.js") },
 			{ find: "@cline/shared", replacement: path.resolve(__dirname, "node_modules/@cline/shared/dist/index.js") },
 			{ find: "vscode", replacement: path.resolve(__dirname, "src/test/vscode-vitest-stub.ts") },
 			{ find: "@", replacement: path.resolve(__dirname, "src") },

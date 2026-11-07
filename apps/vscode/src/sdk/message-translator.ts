@@ -45,7 +45,6 @@ import type {
 } from "@shared/ExtensionMessage"
 import { Logger } from "@shared/services/Logger"
 import * as path from "path"
-import { isClineManagedProvider } from "@/shared/utils/cline"
 import { arePathsEqual, getDesktopDir } from "@/utils/path"
 import {
 	CLINE_FREE_PROMOTION_ENDED_ERROR_CODE,
@@ -2721,6 +2720,16 @@ function describeVertexGlobalRegionError(rawMessage: string, providerId?: string
 }
 
 /**
+ * Providers backed by the Cline account (cloud) rather than a local BYOK key.
+ * Their 401/403 bodies are already the ClineError JSON that drives the
+ * webview's sign-in card, so the local "re-enter your API key" rewrite must
+ * not claim them.
+ */
+function isClineAccountProviderId(providerId: string | undefined): boolean {
+	return providerId === "cline" || providerId === "cline-pass"
+}
+
+/**
  * Reshape an SDK error into the serialized ClineError JSON the webview's
  * ErrorRow expects (`code`, `providerId`, `details`), extracting structured
  * info from the error message when present and falling back to raw text.
@@ -2731,11 +2740,10 @@ export function reshapeErrorForWebview(
 	modelId?: string,
 	errorClass?: ProviderErrorClass,
 ): string {
-	// The ClineError-JSON branches below are cline-provider flows (balance,
-	// spend limit), so "cline" stays their fallback id. The missing-credential
-	// message instead gets the raw value: defaulting there would name the wrong
-	// provider when the active provider id is unknown.
-	const clineErrorProviderId = providerId ?? "cline"
+	// The ClineError-JSON branches below fill in `providerId` only when the
+	// caller knows it: defaulting to a specific provider would name the wrong
+	// one in the sign-in / credits cards.
+	const clineErrorProviderId = providerId
 	const rawMessage = error.message ?? "Unknown error"
 
 	// A retired cline-free/ model answers "model not found" once its free
@@ -2763,15 +2771,16 @@ export function reshapeErrorForWebview(
 		return vertexGlobalRegionMessage
 	}
 
-	// A BYOK provider rejected the configured credentials (llms classified the
-	// HTTP 401/403 while the typed error was still available). Raw provider
-	// bodies here are dead ends — e.g. Mistral's `{"detail":"Invalid API Key"}`
-	// is identical for a wrong, empty, or wrong-scope key — so point the user
-	// at the key configuration instead. Cline-account providers keep the JSON
-	// path below (the webview renders their auth failures as a sign-in card),
-	// and so does an *unknown* provider id: rewriting without knowing the
-	// provider could suppress that sign-in card for a cline-account failure.
-	if (errorClass === "auth" && providerId !== undefined && !isClineManagedProvider(providerId)) {
+	// A provider rejected the configured credentials (llms classified the HTTP
+	// 401/403 while the typed error was still available). Raw provider bodies
+	// here are dead ends — e.g. Mistral's `{"detail":"Invalid API Key"}` is
+	// identical for a wrong, empty, or wrong-scope key — so point the user at
+	// the key configuration instead. An *unknown* provider id keeps the raw
+	// body: rewriting without knowing the provider could misdirect the user.
+	// The Cline account providers are exempt: their rejected-credential body is
+	// already the ClineError JSON the webview parses to render the sign-in
+	// card, and local API-key guidance would replace that account UX.
+	if (errorClass === "auth" && providerId !== undefined && !isClineAccountProviderId(providerId)) {
 		return describeCredentialRejectedError(rawMessage, providerId)
 	}
 
