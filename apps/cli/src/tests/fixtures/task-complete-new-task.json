@@ -7,22 +7,6 @@
 		"response": {
 			"errorsWhileComputingFlags": false,
 			"flags": {
-				"cline-recommended-models-upstream": {
-					"key": "cline-recommended-models-upstream",
-					"enabled": true,
-					"variant": null,
-					"reason": {
-						"code": "condition_match",
-						"condition_index": 3,
-						"description": "Matched condition set 4"
-					},
-					"metadata": {
-						"id": "REDACTED",
-						"version": 2,
-						"description": null,
-						"payload": null
-					}
-				},
 				"worktree-exp": {
 					"key": "worktree-exp",
 					"enabled": false,

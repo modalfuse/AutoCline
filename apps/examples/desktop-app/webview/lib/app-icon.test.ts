@@ -30,16 +30,16 @@ afterEach(() => {
 });
 
 describe("app icon", () => {
-	it("defaults to the bundled midnight icon and validates stored values", () => {
-		expect(DEFAULT_APP_ICON).toBe("midnight");
+	it("defaults to the custom AutoCline icon and validates stored values", () => {
+		expect(DEFAULT_APP_ICON).toBe("custom");
 		expect(readStoredAppIcon()).toBe(DEFAULT_APP_ICON);
 		window.localStorage.setItem(APP_ICON_STORAGE_KEY, "bogus");
 		expect(readStoredAppIcon()).toBe(DEFAULT_APP_ICON);
 		window.localStorage.setItem(APP_ICON_STORAGE_KEY, "toString");
 		expect(readStoredAppIcon()).toBe(DEFAULT_APP_ICON);
-		expect(isAppIconId("midnight")).toBe(true);
-		expect(isAppIconId("hologram")).toBe(true);
-		expect(isAppIconId("chip")).toBe(true);
+		expect(isAppIconId("custom")).toBe(true);
+		expect(isAppIconId("classic")).toBe(false);
+		expect(isAppIconId("midnight")).toBe(false);
 		expect(isAppIconId("steel")).toBe(false);
 		expect(isAppIconId("sunrise")).toBe(false);
 		expect(isAppIconId("bogus")).toBe(false);
@@ -54,9 +54,11 @@ describe("app icon", () => {
 	});
 
 	it.each([
-		["sunrise", "hologram"],
-		["steel", "midnight"],
-	])("migrates the retired %s preference to %s", (retired, replacement) => {
+		["sunrise", "custom"],
+		["steel", "custom"],
+		["classic", "custom"],
+		["midnight", "custom"],
+	])("migrates the retired/legacy %s preference to %s", (retired, replacement) => {
 		window.localStorage.setItem(APP_ICON_STORAGE_KEY, retired);
 
 		expect(readStoredAppIcon()).toBe(replacement);
@@ -99,14 +101,14 @@ describe("app icon", () => {
 		expect(document.querySelector('link[rel="icon"]')).toBeNull();
 	});
 
-	it("re-applies only non-bundled choices at boot", async () => {
+	it("clears stored preference without applying theme icon (AutoCline uses fixed custom icon)", async () => {
 		isTauriAvailable.mockReturnValue(true);
 		invoke.mockResolvedValue(true);
-		await syncAppIcon();
-		expect(invoke).not.toHaveBeenCalled();
-
 		window.localStorage.setItem(APP_ICON_STORAGE_KEY, "classic");
 		await syncAppIcon();
-		expect(invoke).toHaveBeenCalledWith("set_app_icon", { icon: "classic" });
+		// syncAppIcon is now a no-op for AutoCline: it only clears old localStorage,
+		// does not call set_app_icon because the custom icon is baked into the bundle.
+		expect(invoke).not.toHaveBeenCalled();
+		expect(window.localStorage.getItem(APP_ICON_STORAGE_KEY)).toBeNull();
 	});
 });

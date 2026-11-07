@@ -112,7 +112,7 @@ describe("buildClineSystemPrompt mode instructions", () => {
 		expect(rulesIndex).toBeLessThan(prompt.indexOf(MODE_TAG_INSTRUCTIONS));
 	});
 
-	it("includes rich workspace metadata for the Cline backend parser", () => {
+	it("includes rich workspace metadata when metadata is supplied", () => {
 		const metadata = JSON.stringify({
 			workspaces: {
 				"/workspace/project": {
@@ -124,7 +124,6 @@ describe("buildClineSystemPrompt mode instructions", () => {
 		});
 		const prompt = buildClineSystemPrompt({
 			...BASE_OPTIONS,
-			providerId: "cline",
 			metadata,
 		});
 

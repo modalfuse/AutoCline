@@ -5,12 +5,18 @@ const envSnapshot = {
 	CLINE_HUB_DISCOVERY_PATH: process.env.CLINE_HUB_DISCOVERY_PATH,
 	CLINE_DATA_DIR: process.env.CLINE_DATA_DIR,
 	CLINE_BUILD_ENV: process.env.CLINE_BUILD_ENV,
+	CLINE_HUB_PORT: process.env.CLINE_HUB_PORT,
 };
 
 beforeEach(() => {
 	// Pin to production so default port assertions are deterministic regardless
 	// of the ambient build env (e.g. when vitest sets CLINE_BUILD_ENV=development).
 	process.env.CLINE_BUILD_ENV = "production";
+	// Own the port too: a full-suite harness may inject a random CLINE_HUB_PORT
+	// (e.g. 61691) to isolate the real Hub. The default-endpoint assertion is
+	// about the built-in default, so clear the inherited override here and
+	// restore whatever the parent process had afterwards.
+	delete process.env.CLINE_HUB_PORT;
 });
 
 afterEach(() => {
@@ -20,6 +26,11 @@ afterEach(() => {
 		delete process.env.CLINE_BUILD_ENV;
 	} else {
 		process.env.CLINE_BUILD_ENV = envSnapshot.CLINE_BUILD_ENV;
+	}
+	if (envSnapshot.CLINE_HUB_PORT === undefined) {
+		delete process.env.CLINE_HUB_PORT;
+	} else {
+		process.env.CLINE_HUB_PORT = envSnapshot.CLINE_HUB_PORT;
 	}
 	vi.useRealTimers();
 	vi.restoreAllMocks();

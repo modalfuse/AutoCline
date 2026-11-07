@@ -16,13 +16,8 @@ import {
 	requestToolApproval,
 	submitAndExitInTerminal,
 } from "../utils/approval";
-import { formatCliErrorMessage } from "../utils/cline-pass-errors";
+import { formatCliErrorMessage } from "../utils/errors";
 import { handleEvent, handleTeamEvent } from "../utils/events";
-import {
-	shouldZeroClineFreeModelCost,
-	zeroCliAgentEventCost,
-	zeroCliUsageCost,
-} from "../utils/free-model-cost";
 import { createRuntimeHooks } from "../utils/hooks";
 import {
 	c,
@@ -191,10 +186,8 @@ export async function runAgent(
 	let reasoningChunkCount = 0;
 	let redactedReasoningChunkCount = 0;
 	const displayedErrorMessages = new Set<string>();
-	const shouldZeroCost = await shouldZeroClineFreeModelCost(config);
 
-	const onAgentEvent = (rawEvent: AgentEvent): void => {
-		const event = zeroCliAgentEventCost(rawEvent, shouldZeroCost);
+	const onAgentEvent = (event: AgentEvent): void => {
 		if (event.type === "content_start" && event.contentType === "reasoning") {
 			reasoningChunkCount += 1;
 			if (event.redacted) {
@@ -207,9 +200,7 @@ export async function runAgent(
 			event.error.message.trim()
 		) {
 			displayedErrorMessages.add(
-				formatCliErrorMessage(event.error.message, {
-					modelId: config.modelId,
-				}).trim(),
+				formatCliErrorMessage(event.error.message).trim(),
 			);
 		}
 		handleEvent(event, config);
@@ -357,14 +348,8 @@ export async function runAgent(
 		const usageSummary = await sessionManager.getAccumulatedUsage(
 			started.sessionId,
 		);
-		const aggregateUsage = zeroCliUsageCost(
-			usageSummary?.aggregateUsage,
-			shouldZeroCost,
-		);
-		const usage = zeroCliUsageCost(
-			aggregateUsage ?? usageSummary?.usage ?? result.usage,
-			shouldZeroCost,
-		);
+		const aggregateUsage = usageSummary?.aggregateUsage;
+		const usage = aggregateUsage ?? usageSummary?.usage ?? result.usage;
 
 		if (config.outputMode === "json") {
 			emitJsonLine("stdout", {
@@ -399,9 +384,7 @@ export async function runAgent(
 		}
 
 		if (result.finishReason !== "completed") {
-			const errorText = formatCliErrorMessage(result.text, {
-				modelId: config.modelId,
-			}).trim();
+			const errorText = formatCliErrorMessage(result.text).trim();
 			if (
 				errorText &&
 				(config.outputMode === "json" || !displayedErrorMessages.has(errorText))
@@ -422,7 +405,7 @@ export async function runAgent(
 		);
 		process.exitCode = 0;
 	} catch (err) {
-		const message = formatCliErrorMessage(err, { modelId: config.modelId });
+		const message = formatCliErrorMessage(err);
 		logCliError(config.logger, "CLI task run failed", { error: err });
 		writeErr(message);
 		process.exitCode = 1;

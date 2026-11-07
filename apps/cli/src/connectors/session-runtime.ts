@@ -63,9 +63,7 @@ export async function buildConnectorStartRequest(input: {
 }): Promise<ChatStartSessionRequest> {
 	const providerSettingsManager = new ProviderSettingsManager();
 	const lastUsedProviderSettings =
-		providerSettingsManager.getLastUsedProviderSettings({
-			isClinePassEnabled: true,
-		});
+		providerSettingsManager.getLastUsedProviderSettings();
 	const provider = normalizeProviderId(
 		input.options.provider?.trim() ||
 			lastUsedProviderSettings?.provider ||
@@ -99,7 +97,6 @@ export async function buildConnectorStartRequest(input: {
 	const systemPrompt = await resolveSystemPrompt({
 		cwd,
 		explicitSystemPrompt: input.options.systemPrompt,
-		providerId: provider,
 		rules: input.systemRules,
 	});
 	// Providers without a bundled catalog (e.g. a local Ollama server that has

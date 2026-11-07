@@ -2,9 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleName</key>
+	<string>AutoCline</string>
+	<key>CFBundleDisplayName</key>
+	<string>AutoCline</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>44</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Cline uses the microphone to transcribe speech into chat input.</string>
+	<string>AutoCline uses the microphone to transcribe speech into chat input.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Cline uses speech recognition to turn your voice into chat input.</string>
+	<string>AutoCline uses speech recognition to turn your voice into chat input.</string>
 </dict>
 </plist>

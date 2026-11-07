@@ -47,22 +47,16 @@ export {
 } from "./providers/error-classification";
 export {
 	ClineFreeModelLimitError,
-	ClineNotSubscribedError,
 	ClineOrgIndividualInferenceSubscriptionError,
-	ClinePassLimitError,
 	extractClineFreeModelLimitResetTime,
 	extractClinePassLimitMessage,
-	getClineNotSubscribedMessage,
 	getClineOrgIndividualInferenceSubscriptionMessage,
-	getClinePassSubscriptionUrl,
 	isClineFreeModelLimitError,
 	isClineFreeModelLimitMessage,
 	isClineModelNotFoundMessage,
-	isClineNotSubscribedError,
 	isClineNotSubscribedMessage,
 	isClineOrgIndividualInferenceSubscriptionError,
 	isClineOrgIndividualInferenceSubscriptionMessage,
-	isClinePassLimitError,
 	isClinePassLimitMessage,
 } from "./providers/errors";
 export {

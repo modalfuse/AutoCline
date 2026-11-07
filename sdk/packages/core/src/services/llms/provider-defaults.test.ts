@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	clearLiveModelsCatalogCache,
 	clearPrivateModelsCatalogCache,
+	formatLiteLlmVendorModelLabel,
 	getLiveModelsCatalog,
 	isPrivateModelCatalogProvider,
 	resolveProviderConfig,
@@ -31,6 +32,24 @@ describe("isPrivateModelCatalogProvider", () => {
 		"anthropic",
 	])("does not classify %s as endpoint-specific", (providerId) => {
 		expect(isPrivateModelCatalogProvider(providerId)).toBe(false);
+	});
+});
+
+describe("formatLiteLlmVendorModelLabel", () => {
+	it("formats vendor/model upstream ids as 厂商-模型", () => {
+		expect(formatLiteLlmVendorModelLabel("deepseek/deepseek-chat", "x")).toBe(
+			"DeepSeek-deepseek-chat",
+		);
+		expect(formatLiteLlmVendorModelLabel("dashscope/qwen-flash", "x")).toBe(
+			"DashScope-qwen-flash",
+		);
+	});
+
+	it("falls back when upstream is missing", () => {
+		expect(formatLiteLlmVendorModelLabel(undefined, "deepseek-chat")).toBe(
+			"deepseek-chat",
+		);
+		expect(formatLiteLlmVendorModelLabel("solo", "fallback")).toBe("solo");
 	});
 });
 
@@ -66,12 +85,15 @@ describe("live catalog request bounds", () => {
 		const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
 		const fetchMock = vi.fn(async () => Response.json({}));
 		vi.stubGlobal("fetch", fetchMock);
+		const first = await getLiveModelsCatalog({ cacheTtlMs: 100 });
+		// A cache hit inside the TTL must not issue a second request.
 		await getLiveModelsCatalog({ cacheTtlMs: 100 });
-		await getLiveModelsCatalog({ cacheTtlMs: 100 });
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(first).toEqual({});
 		now.mockReturnValue(1_101);
-		await getLiveModelsCatalog({ cacheTtlMs: 100 });
-		expect(fetchMock).toHaveBeenCalledTimes(4);
+		const refreshed = await getLiveModelsCatalog({ cacheTtlMs: 100 });
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(refreshed).toEqual({});
 	});
 });
 
@@ -93,6 +115,9 @@ describe("resolveProviderConfig", () => {
 			vi.fn(async () => {
 				return new Response(
 					JSON.stringify({
+						// The OpenRouter models.dev key is aliased to the runtime
+						// `openrouter` provider id, so live lookups must apply the
+						// same key mapping as generated catalog lookups.
 						openrouter: {
 							models: {
 								"vendor/live-only-model": {
@@ -110,7 +135,7 @@ describe("resolveProviderConfig", () => {
 			}),
 		);
 
-		const resolved = await resolveProviderConfig("cline", {
+		const resolved = await resolveProviderConfig("openrouter", {
 			loadLatestOnInit: true,
 			failOnError: false,
 			cacheTtlMs: 0,
@@ -119,44 +144,12 @@ describe("resolveProviderConfig", () => {
 		expect(resolved?.knownModels?.["vendor/live-only-model"]?.name).toBe(
 			"Live Only Model",
 		);
+		// The bundled OpenRouter catalog is still merged underneath the live
+		// layer, so the alias resolution must add to it rather than replace it.
+		expect(Object.keys(resolved?.knownModels ?? {}).length).toBeGreaterThan(1);
 	});
 
-	it("includes Cline Cloud models only for explicit cloud callers", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async (input: string | URL | Request) => {
-				if (String(input) === "https://models.dev/api.json") {
-					return new Response(JSON.stringify({}), { status: 200 });
-				}
-				return new Response(
-					JSON.stringify({
-						clineCloud: [
-							{
-								id: "cline-cloud/cloud-only",
-								name: "Cloud Only",
-							},
-						],
-					}),
-					{ status: 200 },
-				);
-			}),
-		);
-
-		const local = await resolveProviderConfig("cline", {
-			loadLatestOnInit: true,
-			failOnError: false,
-		});
-		const cloud = await resolveProviderConfig("cline", {
-			loadLatestOnInit: true,
-			includeClineCloudModels: true,
-			failOnError: false,
-		});
-
-		expect(local?.knownModels).not.toHaveProperty("cline-cloud/cloud-only");
-		expect(cloud?.knownModels).toHaveProperty("cline-cloud/cloud-only");
-	});
-
-	it("filters image-output models from the merged Cline catalog", async () => {
+	it("merges live and user models without dropping image-output entries", async () => {
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async () => {
@@ -187,15 +180,18 @@ describe("resolveProviderConfig", () => {
 			}),
 		);
 
+		// Neither the live catalog layer nor explicit user overrides are
+		// filtered by modality: `mergeKnownModels` only layers sources and
+		// re-sorts by release date, so image-output models survive the merge.
 		const resolved = await resolveProviderConfig(
-			"cline",
+			"openrouter",
 			{
 				loadLatestOnInit: true,
 				failOnError: false,
 				cacheTtlMs: 0,
 			},
 			{
-				providerId: "cline",
+				providerId: "openrouter",
 				modelId: "vendor/live-chat-model",
 				knownModels: {
 					"vendor/custom-image-model": {
@@ -218,46 +214,49 @@ describe("resolveProviderConfig", () => {
 		expect(resolved?.knownModels?.["vendor/live-chat-model"]?.name).toBe(
 			"Live Chat Model",
 		);
-		expect(resolved?.knownModels?.["vendor/live-image-model"]).toBeUndefined();
+		expect(resolved?.knownModels?.["vendor/live-image-model"]).toMatchObject({
+			id: "vendor/live-image-model",
+			name: "Live Image Model",
+			modalities: { output: ["text", "image"] },
+		});
 		expect(
 			resolved?.knownModels?.["vendor/custom-image-model"],
-		).toBeUndefined();
+		).toMatchObject({
+			id: "vendor/custom-image-model",
+			modalities: { output: ["image"] },
+		});
 		expect(
 			resolved?.knownModels?.["vendor/custom-image-operation-model"],
-		).toBeUndefined();
+		).toMatchObject({
+			id: "vendor/custom-image-operation-model",
+			operation: "image-generation",
+		});
 	});
 
-	it("uses only live Cline recommended models for ClinePass when live models are found", async () => {
-		const fetchMock = vi.fn(async (url: string) => {
-			if (url === "https://models.test/api.json") {
-				return new Response(
-					JSON.stringify({
-						openrouter: {
-							models: {
-								"vendor/live-pass-model": {
-									name: "Live Pass Model",
-									tool_call: true,
-									reasoning: true,
-									limit: { context: 256_000, input: 200_000, output: 32_000 },
+	it("merges live models into the bundled catalog preserving live release ordering", async () => {
+		const fetchMock = vi.fn(async () => {
+			return new Response(
+				JSON.stringify({
+					openrouter: {
+						models: {
+							"vendor/live-older-model": {
+								name: "Live Older Model",
+								tool_call: true,
+								release_date: "2024-01-01",
+							},
+							"vendor/live-newer-model": {
+								name: "Live Newer Model",
+								tool_call: true,
+								release_date: "2026-01-01",
+								cost: {
+									input: 1,
+									output: 2,
+									cache_read: 0.1,
+									cache_write: 0.2,
 								},
 							},
 						},
-					}),
-					{
-						status: 200,
-						headers: { "content-type": "application/json" },
 					},
-				);
-			}
-
-			return new Response(
-				JSON.stringify({
-					clinePass: [
-						{
-							id: "cline-pass/live-pass-model",
-							name: "vendor/live-pass-model",
-						},
-					],
 				}),
 				{
 					status: 200,
@@ -267,143 +266,56 @@ describe("resolveProviderConfig", () => {
 		});
 		vi.stubGlobal("fetch", fetchMock);
 
-		const resolved = await resolveProviderConfig("cline-pass", {
+		const resolved = await resolveProviderConfig("openrouter", {
 			loadLatestOnInit: true,
 			failOnError: false,
 			cacheTtlMs: 0,
 			url: "https://models.test/api.json",
 		});
 
-		expect(fetchMock).toHaveBeenCalledTimes(2);
-		expect(resolved?.knownModels?.["cline-pass/live-pass-model"]).toMatchObject(
-			{
-				id: "cline-pass/live-pass-model",
-				name: "Live Pass Model",
-				contextWindow: 256_000,
-				maxInputTokens: 200_000,
-				maxTokens: 32_000,
-			},
-		);
-		expect(resolved?.knownModels?.["cline-pass/mimo-v2.5-pro"]).toBeUndefined();
-	});
-
-	it("keeps ClinePass models ahead of newer free models in the served catalog", async () => {
-		const fetchMock = vi.fn(async (url: string) => {
-			if (url === "https://models.test/api.json") {
-				return new Response(
-					JSON.stringify({
-						openrouter: {
-							models: {
-								"vendor/live-pass-model": {
-									name: "Live Pass Model",
-									tool_call: true,
-									release_date: "2024-01-01",
-								},
-								"vendor/live-free-model": {
-									name: "Live Free Model",
-									tool_call: true,
-									release_date: "2026-01-01",
-									cost: {
-										input: 1,
-										output: 2,
-										cache_read: 0.1,
-										cache_write: 0.2,
-									},
-								},
-							},
-						},
-					}),
-					{
-						status: 200,
-						headers: { "content-type": "application/json" },
-					},
-				);
-			}
-
-			return new Response(
-				JSON.stringify({
-					clinePass: [
-						{
-							id: "cline-pass/live-pass-model",
-							name: "vendor/live-pass-model",
-						},
-					],
-					free: [{ id: "cline-free/live-free-model" }],
-				}),
-				{
-					status: 200,
-					headers: { "content-type": "application/json" },
-				},
-			);
-		});
-		vi.stubGlobal("fetch", fetchMock);
-
-		const resolved = await resolveProviderConfig("cline-pass", {
-			loadLatestOnInit: true,
-			failOnError: false,
-			cacheTtlMs: 0,
-			url: "https://models.test/api.json",
-		});
-
-		// The first live model is the fallback default when the bundled default
-		// id is not in the live list, so a subscription model must stay first
-		// even when a free model has a newer release date.
-		expect(Object.keys(resolved?.knownModels ?? {})).toEqual([
-			"cline-pass/live-pass-model",
-			"cline-free/live-free-model",
+		// The shared catalog feed is the only live request issued.
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+			"https://models.test/api.json",
 		]);
-		expect(resolved?.knownModels?.["cline-free/live-free-model"]).toMatchObject(
-			{
-				id: "cline-free/live-free-model",
-				name: "Live Free Model (free)",
-			},
+		// Live catalog metadata is authoritative, so the newer model sorts ahead
+		// and keeps its declared pricing.
+		const liveIds = Object.keys(resolved?.knownModels ?? {}).filter((id) =>
+			id.startsWith("vendor/live-"),
 		);
-		expect(
-			resolved?.knownModels?.["cline-free/live-free-model"]?.pricing,
-		).toEqual({
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
+		expect(liveIds).toEqual([
+			"vendor/live-newer-model",
+			"vendor/live-older-model",
+		]);
+		expect(resolved?.knownModels?.["vendor/live-newer-model"]).toMatchObject({
+			id: "vendor/live-newer-model",
+			name: "Live Newer Model",
+			pricing: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2 },
 		});
+		// The bundled catalog is still merged underneath the live layer.
+		expect(resolved?.knownModels?.["z-ai/glm-5.2"]?.id).toBe("z-ai/glm-5.2");
 	});
 
-	it("adds cline-free models from the recommended endpoint to the Cline catalog", async () => {
-		const fetchMock = vi.fn(async (url: string) => {
-			if (url === "https://models.test/api.json") {
-				return new Response(
-					JSON.stringify({
-						openrouter: {
-							models: {
-								"vendor/live-free-model": {
-									name: "Live Free Model",
-									tool_call: true,
-									reasoning: true,
-									limit: { context: 300_000, input: 250_000, output: 64_000 },
-									cost: {
-										input: 1,
-										output: 2,
-										cache_read: 0.1,
-										cache_write: 0.2,
-									},
+	it("merges live model metadata into the bundled catalog for supported providers", async () => {
+		const fetchMock = vi.fn(async () => {
+			return new Response(
+				JSON.stringify({
+					openrouter: {
+						models: {
+							"vendor/live-reasoning-model": {
+								name: "Live Reasoning Model",
+								tool_call: true,
+								reasoning: true,
+								limit: { context: 300_000, input: 250_000, output: 64_000 },
+								cost: {
+									input: 1,
+									output: 2,
+									cache_read: 0.1,
+									cache_write: 0.2,
 								},
 							},
 						},
-					}),
-					{
-						status: 200,
-						headers: { "content-type": "application/json" },
 					},
-				);
-			}
-
-			return new Response(
-				JSON.stringify({
-					free: [
-						{
-							id: "cline-free/live-free-model",
-						},
-					],
 				}),
 				{
 					status: 200,
@@ -413,52 +325,72 @@ describe("resolveProviderConfig", () => {
 		});
 		vi.stubGlobal("fetch", fetchMock);
 
-		const resolved = await resolveProviderConfig("cline", {
+		const resolved = await resolveProviderConfig("openrouter", {
 			loadLatestOnInit: true,
 			failOnError: false,
 			cacheTtlMs: 0,
 			url: "https://models.test/api.json",
 		});
 
-		expect(fetchMock).toHaveBeenCalledTimes(2);
-		expect(resolved?.knownModels?.["cline-free/live-free-model"]).toMatchObject(
-			{
-				id: "cline-free/live-free-model",
-				name: "Live Free Model (free)",
-				contextWindow: 300_000,
-				maxInputTokens: 250_000,
-				maxTokens: 64_000,
-				pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			},
-		);
+		// One live request for the shared feed; no extra per-provider request.
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(
+			resolved?.knownModels?.["vendor/live-reasoning-model"],
+		).toMatchObject({
+			id: "vendor/live-reasoning-model",
+			name: "Live Reasoning Model",
+			contextWindow: 300_000,
+			maxInputTokens: 250_000,
+			maxTokens: 64_000,
+			pricing: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2 },
+		});
+		expect(
+			resolved?.knownModels?.["vendor/live-reasoning-model"]?.capabilities,
+		).toEqual(expect.arrayContaining(["tools", "reasoning"]));
 	});
 
-	it("falls back to generated ClinePass models when no live ClinePass models are found", async () => {
-		const fetchMock = vi.fn(async (url: string) => {
-			if (url === "https://models.test/api.json") {
-				return new Response(
-					JSON.stringify({
-						openrouter: {
-							models: {
-								"vendor/live-openrouter-model": {
-									name: "Live OpenRouter Model",
-									tool_call: true,
-								},
+	it("merges generated catalog models for every catalog key of a runtime provider", async () => {
+		const generated = getGeneratedModelsForProvider("openrouter");
+
+		const resolved = await resolveProviderConfig("openrouter");
+
+		// `resolveProviderModelCatalogKeys("openrouter")` resolves to the single
+		// `openrouter` catalog, so every generated entry must reach the merged
+		// picker with its metadata intact. This is the contract that broke when
+		// the removed bundled Cline catalog used to be a second merge source.
+		expect(Object.keys(generated).length).toBeGreaterThan(0);
+		for (const [modelId, info] of Object.entries(generated)) {
+			expect(resolved?.knownModels?.[modelId]).toBeDefined();
+			expect(resolved?.knownModels?.[modelId]).toMatchObject({
+				id: info.id,
+				name: info.name,
+			});
+		}
+		// Layering only adds sources; it never truncates the generated catalog.
+		expect(
+			Object.keys(resolved?.knownModels ?? {}).length,
+		).toBeGreaterThanOrEqual(Object.keys(generated).length);
+	});
+
+	it("removes the ClinePass provider from defaults and the generated catalog", async () => {
+		const fetchMock = vi.fn(async () =>
+			new Response(
+				JSON.stringify({
+					openrouter: {
+						models: {
+							"vendor/live-openrouter-model": {
+								name: "Live OpenRouter Model",
+								tool_call: true,
 							},
 						},
-					}),
-					{
-						status: 200,
-						headers: { "content-type": "application/json" },
 					},
-				);
-			}
-
-			return new Response(JSON.stringify({ clinePass: [] }), {
-				status: 200,
-				headers: { "content-type": "application/json" },
-			});
-		});
+				}),
+				{
+					status: 200,
+					headers: { "content-type": "application/json" },
+				},
+			),
+		);
 		vi.stubGlobal("fetch", fetchMock);
 
 		const resolved = await resolveProviderConfig("cline-pass", {
@@ -468,39 +400,54 @@ describe("resolveProviderConfig", () => {
 			url: "https://models.test/api.json",
 		});
 
-		const [generatedId, generatedModel] =
-			Object.entries(getGeneratedModelsForProvider("cline-pass")).find(([id]) =>
-				id.startsWith("cline-pass/"),
-			) ?? [];
-		expect(fetchMock).toHaveBeenCalledTimes(2);
-		expect(generatedId).toBeDefined();
-		expect(resolved?.knownModels?.[generatedId ?? ""]?.name).toBe(
-			generatedModel?.name,
-		);
+		// ClinePass was intentionally removed as a built-in provider, so config
+		// resolution is an explicit absence — not a generated-model fallback.
+		expect(resolved).toBeUndefined();
 		expect(
-			resolved?.knownModels?.["vendor/live-openrouter-model"],
-		).toBeUndefined();
+			Object.keys(getGeneratedModelsForProvider("cline-pass")),
+		).toEqual([]);
+		// Without a registered manifest no catalog request is issued at all.
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it("prefers Vercel-style Z.ai ids in Cline known models", async () => {
-		const resolved = await resolveProviderConfig("cline");
+	it("keeps the OpenRouter catalog's own Z.ai model id", async () => {
+		const resolved = await resolveProviderConfig("openrouter");
 
-		expect(resolved?.knownModels?.["zai/glm-5.2"]).toMatchObject({
-			id: "zai/glm-5.2",
-			name: "GLM 5.2",
+		// The OpenRouter catalog carries GLM 5.2 under its Vercel-style
+		// `z-ai/glm-5.2` id, and `resolveProviderModelCatalogKeys("openrouter")`
+		// maps to the `openrouter` catalog only — so the bare `glm-5.2` id from
+		// the separate Z.ai catalog must not be merged in here.
+		expect(resolved?.knownModels?.["z-ai/glm-5.2"]).toMatchObject({
+			id: "z-ai/glm-5.2",
+			name: "GLM-5.2",
+			contextWindow: 1_048_576,
+			maxInputTokens: 1_048_576,
+		});
+		expect(resolved?.knownModels?.["glm-5.2"]).toBeUndefined();
+	});
+
+	it("uses the Z.ai catalog for the zai provider", async () => {
+		const resolved = await resolveProviderConfig("zai");
+
+		expect(resolved?.knownModels?.["glm-5.2"]).toMatchObject({
+			id: "glm-5.2",
+			name: "GLM-5.2",
 			contextWindow: 1_000_000,
 			maxInputTokens: 1_000_000,
+			maxTokens: 131_072,
 		});
+		// The OpenRouter-only alias id belongs to a different catalog, so it is
+		// not synthesized into the Z.ai picker.
 		expect(resolved?.knownModels?.["z-ai/glm-5.2"]).toBeUndefined();
 	});
 
-	it("preserves explicit Cline known model overrides for alias ids", async () => {
-		const resolved = await resolveProviderConfig("cline", undefined, {
-			providerId: "cline",
-			modelId: "z-ai/glm-5.2",
+	it("preserves explicit known model overrides for catalog ids", async () => {
+		const resolved = await resolveProviderConfig("zai", undefined, {
+			providerId: "zai",
+			modelId: "glm-5.2",
 			knownModels: {
-				"z-ai/glm-5.2": {
-					id: "z-ai/glm-5.2",
+				"glm-5.2": {
+					id: "glm-5.2",
 					name: "Custom GLM 5.2",
 					contextWindow: 123_456,
 					maxInputTokens: 123_456,
@@ -508,16 +455,13 @@ describe("resolveProviderConfig", () => {
 			},
 		});
 
-		expect(resolved?.knownModels?.["z-ai/glm-5.2"]).toMatchObject({
-			id: "z-ai/glm-5.2",
+		// User overrides are merged last, so an explicit catalog id replaces the
+		// generated metadata for that id.
+		expect(resolved?.knownModels?.["glm-5.2"]).toMatchObject({
+			id: "glm-5.2",
 			name: "Custom GLM 5.2",
 			contextWindow: 123_456,
 			maxInputTokens: 123_456,
-		});
-		expect(resolved?.knownModels?.["zai/glm-5.2"]).toMatchObject({
-			id: "zai/glm-5.2",
-			contextWindow: 1_000_000,
-			maxInputTokens: 1_000_000,
 		});
 	});
 
@@ -753,14 +697,8 @@ describe("resolveProviderConfig", () => {
 			"http://localhost:4000/v1/model/info",
 			"http://localhost:4000/model/info",
 		]);
-		expect(resolved?.knownModels?.["openai/gpt-4o-mini"]).toEqual(
-			expect.objectContaining({
-				name: "private-proxy-model",
-				maxTokens: 64_000,
-				maxInputTokens: 500_000,
-				capabilities: expect.arrayContaining(["images", "reasoning"]),
-			}),
-		);
+		// Route by model_name only; label from litellm_params.model (厂商-模型).
+		expect(resolved?.knownModels?.["openai/gpt-4o-mini"]).toBeUndefined();
 		expect(resolved?.knownModels?.["private-proxy-model"]).toEqual(
 			expect.objectContaining({
 				name: "private-proxy-model",
@@ -770,7 +708,6 @@ describe("resolveProviderConfig", () => {
 			}),
 		);
 		expect(Object.keys(resolved?.knownModels ?? {}).sort()).toEqual([
-			"openai/gpt-4o-mini",
 			"private-proxy-model",
 		]);
 		expect(resolved?.knownModels?.["gpt-5.4"]).toBeUndefined();

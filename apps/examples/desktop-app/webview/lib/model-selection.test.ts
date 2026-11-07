@@ -48,11 +48,11 @@ it("remembers the execution target and keeps Cloud and Local models separate", (
 });
 
 it.each([
-	["cline", "openai/gpt-test", "openai/gpt-test"],
-	["cline-pass", "cline-pass/pass-test", "cline-pass/pass-test"],
-	["cline-pass", "cline-free/free-test", "cline-free/free-test"],
+	["cline", "openai/gpt-test", CLINE_DEFAULT_MODEL_ID],
+	["cline-pass", "cline-pass/pass-test", CLINE_DEFAULT_MODEL_ID],
+	["cline-pass", "cline-free/free-test", CLINE_DEFAULT_MODEL_ID],
 	["openrouter", "openai/gpt-test", CLINE_DEFAULT_MODEL_ID],
-])("starts Cloud from the local %s model when nothing is remembered", (provider, model, expected) => {
+])("starts Cloud from the default model when nothing is remembered", (provider, model, expected) => {
 	writeModelSelectionStorageToWindow({
 		lastProvider: provider,
 		lastModelByProvider: { [provider]: model },

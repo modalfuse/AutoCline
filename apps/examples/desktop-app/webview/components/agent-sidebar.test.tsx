@@ -193,6 +193,39 @@ afterEach(async () => {
 	vi.restoreAllMocks();
 });
 
+describe("AgentSidebar home button branding", () => {
+	it("renders the filled AutoCline brand mark (img, not a masked glyph)", async () => {
+		const thread = makeThread("alpha", 1);
+		const history = makeSessionHistory([thread], vi.fn());
+		await act(async () => {
+			root.render(
+				<SidebarProvider>
+					<AgentSidebar
+						activeSessionId={thread.id}
+						onHome={vi.fn()}
+						onSettingsSectionChange={vi.fn()}
+						sessionHistory={history}
+						setView={vi.fn()}
+						settingsSection="General"
+						view="chat"
+					/>
+				</SidebarProvider>,
+			);
+		});
+		const home = container.querySelector('[aria-label="AutoCline home"]');
+		if (!home) throw new Error("Missing AutoCline home button");
+		const icon = home.querySelector("img");
+		if (!icon) throw new Error("Home button is missing the brand <img>");
+		// Transparent export: the opaque source art is drawn on white, which
+		// renders as a white tile on the (dark) sidebar.
+		expect(icon.getAttribute("src")).toBe("/autocline-brand-icon-transparent.png");
+		// The art is near-black; dark mode must invert it to stay visible.
+		expect(icon.className).toContain("dark:invert");
+		// The old glyph was a CSS mask over /icon.svg — it must be gone here.
+		expect(home.querySelector('[style*="mask"]')).toBeNull();
+	});
+});
+
 describe("AgentSidebar session organization", () => {
 	it("preserves row context-menu rename focus, Escape, and Enter through the shared row", async () => {
 		const thread = makeThread("alpha", 1);
@@ -1103,7 +1136,7 @@ describe("AgentSidebar session organization", () => {
 			);
 		});
 
-		const logoButton = container.querySelector('[aria-label="Cline home"]');
+		const logoButton = container.querySelector('[aria-label="AutoCline home"]');
 		expect(logoButton).not.toBeNull();
 		expect(document.body.textContent).not.toContain("Version 1.2.3");
 
@@ -1111,7 +1144,7 @@ describe("AgentSidebar session organization", () => {
 
 		await vi.waitFor(() => {
 			expect(document.body.textContent).toContain("Version 1.2.3");
-			expect(document.body.textContent).toContain("Cline Hub @25463");
+			expect(document.body.textContent).toContain("AutoCline Hub @25463");
 			expect(document.body.textContent).not.toContain(
 				"ws://127.0.0.1:25463/hub",
 			);
@@ -1151,12 +1184,12 @@ describe("AgentSidebar session organization", () => {
 			);
 		});
 
-		const logoButton = container.querySelector('[aria-label="Cline home"]');
+		const logoButton = container.querySelector('[aria-label="AutoCline home"]');
 		expect(logoButton).not.toBeNull();
 		await hover(logoButton as Element);
 
 		await vi.waitFor(() => {
-			expect(document.body.textContent).toContain("Cline Hub @25463");
+			expect(document.body.textContent).toContain("AutoCline Hub @25463");
 			expect(document.body.textContent).toContain(
 				"Hub connection closed (code=1006)",
 			);
@@ -1222,7 +1255,7 @@ describe("AgentSidebar session organization", () => {
 			);
 		});
 
-		const logo = container.querySelector('[aria-label="Cline home"]');
+		const logo = container.querySelector('[aria-label="AutoCline home"]');
 		const actionsNav = container.querySelector(
 			'[aria-label="Sidebar actions"]',
 		);
@@ -1304,7 +1337,7 @@ describe("AgentSidebar session organization", () => {
 		).toBeNull();
 	});
 
-	it("groups Cline Account, Local, and BYOK under a Provider row", async () => {
+	it("groups Local and BYOK under a Provider row and omits the removed Cline Account sub-page", async () => {
 		const onSettingsSectionChange = vi.fn();
 		const renderSidebar = async (
 			section: "General" | "Local Models",
@@ -1333,12 +1366,36 @@ describe("AgentSidebar session organization", () => {
 
 		const closedNav = await renderSidebar("General");
 		expect(closedNav.querySelector('[aria-label="BYOK"]')).toBeNull();
+		expect(closedNav.querySelector('[aria-label="Local"]')).toBeNull();
+		// The local "Cline" / "ClinePass" providers were removed, and the Cline
+		// Account sub-page they routed to is gone, so no provider selection —
+		// including a stale stored one — can open a removed option.
+		for (const removedProvider of ["", "cline", "cline-pass"]) {
+			window.localStorage.setItem(
+				MODEL_SELECTION_STORAGE_KEY,
+				JSON.stringify({
+					lastProvider: removedProvider,
+					lastModelByProvider: {},
+				}),
+			);
+			await click(buttonWithText("Provider", closedNav));
+			expect(onSettingsSectionChange).toHaveBeenLastCalledWith("Providers");
+			const reopenedNav = container.querySelector(
+				'[aria-label="Settings sections"]',
+			) as HTMLElement;
+			expect(reopenedNav.querySelector('[aria-label="BYOK"]')).not.toBeNull();
+			expect(reopenedNav.querySelector('[aria-label="Local"]')).not.toBeNull();
+			expect(reopenedNav.querySelector('[aria-label="Account"]')).toBeNull();
+			expect(reopenedNav.textContent).not.toContain("Cline Account");
+		}
 		// The Provider row opens the sub-page for the provider the chat uses.
 		for (const [lastProvider, expected] of [
-			["", "Account"],
-			["cline-pass", "Account"],
 			["ollama", "Local Models"],
+			["lmstudio", "Local Models"],
 			["anthropic", "Providers"],
+			// Aliases normalize before the provider-section lookup runs.
+			["openai", "Providers"],
+			["google", "Providers"],
 		] as const) {
 			window.localStorage.setItem(
 				MODEL_SELECTION_STORAGE_KEY,
@@ -1355,6 +1412,15 @@ describe("AgentSidebar session organization", () => {
 		expect(buttonWithText("Provider", openNav).className.split(" ")).toContain(
 			"bg-surface-hover-lighter",
 		);
+		// Sub-pages sit indented under the expanded Provider row.
+		expect(buttonWithText("BYOK", openNav).className.split(" ")).toContain(
+			"pl-8!",
+		);
+		expect(
+			buttonWithText("Local", openNav).compareDocumentPosition(
+				buttonWithText("BYOK", openNav),
+			) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 		await click(buttonWithText("BYOK", openNav));
 		expect(onSettingsSectionChange).toHaveBeenCalledWith("Providers");
 	});
@@ -1453,7 +1519,7 @@ describe("AgentSidebar session organization", () => {
 			);
 		});
 
-		expect(container.querySelector('[aria-label="Cline home"]')).not.toBeNull();
+		expect(container.querySelector('[aria-label="AutoCline home"]')).not.toBeNull();
 		expect(
 			container.querySelector('[aria-label="Sidebar actions"]'),
 		).toBeNull();
@@ -1473,7 +1539,7 @@ describe("AgentSidebar session organization", () => {
 							onSettingsSectionChange={vi.fn()}
 							sessionHistory={makeSessionHistory([], vi.fn())}
 							setView={vi.fn()}
-							settingsSection="Account"
+							settingsSection="Local Models"
 							view="settings"
 						/>
 					</SidebarProvider>
@@ -1492,16 +1558,27 @@ describe("AgentSidebar session organization", () => {
 			container.querySelector('[aria-label="Settings sections"]'),
 		).not.toBeNull();
 		const leftAlignedButtons = [
-			"Cline home",
+			"AutoCline home",
 			"General",
-			"Account",
+			"Provider",
+			"Local",
+			"BYOK",
+			"Key",
+			"Voice",
 			"Expand sidebar",
 			"Settings",
 		];
 		for (const label of leftAlignedButtons) {
 			const button = container.querySelector(`[aria-label="${label}"]`);
+			expect(button).not.toBeNull();
 			expect(button?.className).not.toContain("mx-auto");
 		}
+		// The removed Cline Account section stays out of the collapsed rail too.
+		expect(container.querySelector('[aria-label="Account"]')).toBeNull();
+		// The collapsed rail keeps the active provider sub-page marked.
+		expect(
+			container.querySelector('[aria-label="Local"]')?.getAttribute("aria-current"),
+		).toBe("page");
 		expect(
 			container.querySelector('[aria-label="Expand sidebar"]')?.className,
 		).toContain("mt-auto");

@@ -35,7 +35,7 @@ export class ClineAccountService {
 	 * uses it to tear down the previous account's cloud task and connections
 	 * before `change` sends the request, and to hold cloud reads until it has
 	 * settled. Owned here so that every path that changes the account (the
-	 * Account view, ClinePass selection, remote-config discovery) runs it.
+	 * Account view, remote-config discovery) runs it.
 	 */
 	onAccountChange(boundary: (change: () => Promise<void>) => Promise<void>): void {
 		this.accountChangeBoundary = boundary
@@ -266,29 +266,6 @@ export class ClineAccountService {
 		} catch (error) {
 			Logger.error("Failed to submit limit increase request (RPC):", error)
 			throw error
-		}
-	}
-
-	/**
-	 * Whether the user has a ClinePass subscription, or undefined when that
-	 * could not be checked. ClinePass is the only individual plan. The API
-	 * answers 404 when the user has no current plan and 402 when the plan is
-	 * unpaid; inference on a ClinePass model is refused in both cases.
-	 */
-	async fetchClinePassSubscribedRPC(): Promise<boolean | undefined> {
-		try {
-			const current = await this.authenticatedRequest<{ plan?: unknown } | null>(
-				"/api/v1/users/me/plan",
-				{},
-				{ allowNullData: true },
-			)
-			return !!current?.plan
-		} catch (error) {
-			if (axios.isAxiosError(error) && (error.response?.status === 404 || error.response?.status === 402)) {
-				return false
-			}
-			Logger.error("Failed to fetch ClinePass subscription (RPC):", error)
-			return undefined
 		}
 	}
 

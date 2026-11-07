@@ -1,27 +1,23 @@
-import { EmptyRequest, StringRequest } from "@shared/proto/cline/common"
+import { StringRequest } from "@shared/proto/cline/common"
 import { UpdateSettingsRequest } from "@shared/proto/cline/state"
 import { Mode } from "@shared/storage/types"
-import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
-import { CloudIcon, MonitorIcon, Sparkles } from "lucide-react"
-import { useEffect, useState } from "react"
-import { useClineAuth } from "@/context/ClineAuthContext"
+import { VSCodeCheckbox, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+import { CloudIcon, MonitorIcon } from "lucide-react"
+import { useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
-import { useClinePassPromo } from "@/hooks/useClinePassPromo"
 import { CloudServiceClient, StateServiceClient } from "@/services/grpc-client"
 import { TargetButton } from "../../cloud/TaskTargetPanel"
 import { TabButton } from "../../mcp/configuration/McpConfigurationView"
 import ApiOptions from "../ApiOptions"
-import ClineModelPicker from "../ClineModelPicker"
 import Section from "../Section"
 import { syncModeConfigurations } from "../utils/providerUtils"
 import { useApiConfigurationHandlers } from "../utils/useApiConfigurationHandlers"
 
 interface ApiConfigurationSectionProps {
 	renderSectionHeader?: (tabId: string) => JSX.Element | null
-	initialModelTab?: "recommended" | "free"
 }
 
-const ApiConfigurationSection = ({ renderSectionHeader, initialModelTab }: ApiConfigurationSectionProps) => {
+const ApiConfigurationSection = ({ renderSectionHeader }: ApiConfigurationSectionProps) => {
 	const { cloudSessionsEnabled, cloudTaskTarget, currentCloudTask, clineMessages, mode } = useExtensionState()
 	const showCloud = !!cloudSessionsEnabled || !!currentCloudTask
 	// Open on the settings for where the chat view is about to run (or is running) a task.
@@ -57,21 +53,13 @@ const ApiConfigurationSection = ({ renderSectionHeader, initialModelTab }: ApiCo
 						/>
 					</div>
 				)}
-				{isCloud ? (
-					<CloudModelSettings />
-				) : (
-					<LocalModelSettings currentTab={currentTab} initialModelTab={initialModelTab} setCurrentTab={setCurrentTab} />
-				)}
+				{isCloud ? <CloudModelSettings /> : <LocalModelSettings currentTab={currentTab} setCurrentTab={setCurrentTab} />}
 			</Section>
 		</div>
 	)
 }
 
-const LocalModelSettings = ({
-	initialModelTab,
-	currentTab,
-	setCurrentTab,
-}: Pick<ApiConfigurationSectionProps, "initialModelTab"> & { currentTab: Mode; setCurrentTab: (tab: Mode) => void }) => {
+const LocalModelSettings = ({ currentTab, setCurrentTab }: { currentTab: Mode; setCurrentTab: (tab: Mode) => void }) => {
 	const { planActSeparateModelsSetting, mode, apiConfiguration } = useExtensionState()
 	const { handleFieldsChange } = useApiConfigurationHandlers()
 	return (
@@ -104,11 +92,11 @@ const LocalModelSettings = ({
 
 					{/* Content container */}
 					<div className="-mb-3">
-						<ApiOptions currentMode={currentTab} initialModelTab={initialModelTab} showModelOptions={true} />
+						<ApiOptions currentMode={currentTab} showModelOptions={true} />
 					</div>
 				</div>
 			) : (
-				<ApiOptions currentMode={mode} initialModelTab={initialModelTab} showModelOptions={true} />
+				<ApiOptions currentMode={mode} showModelOptions={true} />
 			)}
 
 			<div className="mb-[5px]">
@@ -143,59 +131,35 @@ const LocalModelSettings = ({
 }
 
 const CloudModelSettings = () => {
-	const { nextCloudModelId, cloudModelId, currentCloudTask, clinePassSubscribed } = useExtensionState()
-	const { activeOrganization } = useClineAuth()
-	const { isClinePassEnabled, openSubscribePage } = useClinePassPromo()
-	const includeClinePass = isClinePassEnabled && !activeOrganization
+	const { nextCloudModelId, cloudModelId, currentCloudTask } = useExtensionState()
 	const runningModelId = currentCloudTask ? cloudModelId : undefined
-
-	// The user may have followed the Subscribe link and come back; re-ask for the plan.
-	useEffect(() => {
-		if (includeClinePass) {
-			CloudServiceClient.refreshClinePassSubscription(EmptyRequest.create({})).catch((error) =>
-				console.error("Failed to refresh ClinePass subscription:", error),
-			)
-		}
-	}, [includeClinePass])
 
 	return (
 		<>
 			<p className="text-xs m-0 text-(--vscode-descriptionForeground)">
-				Cloud tasks run in an isolated sandbox on a Cline model. Usage-Billing models use Cline credits
-				{includeClinePass ? ", ClinePass models use your subscription," : ""} and ClineFree models are free with limited
-				usage. This model is separate from your local Plan and Act models.
+				Cloud tasks run in an isolated sandbox on a Cline model. This model is separate from your local Plan and Act
+				models.
 			</p>
 			{runningModelId && (
 				<p className="text-xs m-0 text-(--vscode-descriptionForeground)">
 					The current cloud task runs on <code>{runningModelId}</code>. A model change applies to the next cloud task.
 				</p>
 			)}
-			<ClineModelPicker
-				cloudSelection={{
-					includeClinePass,
-					clinePassNotice: clinePassSubscribed === false && (
-						<div className="flex items-start gap-2 rounded-sm bg-[var(--vscode-textBlockQuote-background)] px-2.5 py-2 mb-1.5">
-							<Sparkles className="size-3.5 shrink-0 mt-0.5 text-[var(--vscode-charts-yellow)]" />
-							<div className="grow text-xs text-description">
-								These models need a <span className="font-semibold text-foreground">ClinePass</span> subscription,
-								a low-cost monthly plan for the latest open-weights models.{" "}
-								<button
-									className="cursor-pointer border-0 bg-transparent p-0 text-xs text-[var(--vscode-textLink-foreground)] underline hover:text-[var(--vscode-textLink-activeForeground,var(--vscode-textLink-foreground))]"
-									onClick={openSubscribePage}
-									type="button">
-									Subscribe
-								</button>
-							</div>
-						</div>
-					),
-					modelId: nextCloudModelId ?? "",
-					onChange: (modelId) =>
-						CloudServiceClient.setCloudModel(StringRequest.create({ value: modelId })).catch((error) =>
-							console.error("Failed to save cloud model:", error),
-						),
+			<VSCodeTextField
+				className="w-full"
+				onInput={(event) => {
+					const modelId = (event.target as HTMLInputElement).value.trim()
+					if (!modelId || modelId === (nextCloudModelId ?? "")) {
+						return
+					}
+					CloudServiceClient.setCloudModel(StringRequest.create({ value: modelId })).catch((error) =>
+						console.error("Failed to save cloud model:", error),
+					)
 				}}
-				currentMode="act"
-			/>
+				placeholder="Cloud model ID"
+				value={nextCloudModelId ?? ""}>
+				<span>Cloud model</span>
+			</VSCodeTextField>
 		</>
 	)
 }

@@ -71,14 +71,16 @@ describe("formatStatusBarUsageText", () => {
 		).toBe("(12,345) $0.00");
 	});
 
-	it("hides cost entirely for subscription providers", () => {
+	it("formats cost for removed subscription-provider ids like any other provider", () => {
+		// ClinePass was removed from the provider catalog, so there is no
+		// subscription-cost exception left for it: cost is formatted normally.
 		expect(
 			formatStatusBarUsageText({
 				totalTokens: 12_345,
 				totalCost: 0.123,
 				providerId: "cline-pass",
 			}),
-		).toBe("(12,345)");
+		).toBe("(12,345) $0.12");
 	});
 });
 

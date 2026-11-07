@@ -348,6 +348,11 @@ describe("chat workspace paths", () => {
 		"//home//user//.cline//data//workspaces//chat//",
 		"C:\\Users\\dev\\.cline\\data\\workspaces\\chat\\",
 		"\\\\server\\share\\.cline\\data\\workspaces\\chat",
+		// AutoCline keeps its own app-internal chat workspace beside the
+		// official app's; both must be recognized, or the desktop catalog
+		// offers `~/.autocline/data/workspaces/chat` as a user project.
+		"/home/user/.autocline/data/workspaces/chat",
+		"C:\\Users\\dev\\.autocline\\data\\workspaces\\chat\\",
 	])("recognizes chat workspace root %s", (path) => {
 		expect(isChatWorkspacePath(path)).toBe(true);
 	});
@@ -362,6 +367,10 @@ describe("chat workspace paths", () => {
 		"/home/user/.cline/data/workspaces/Chat",
 		"/home/user/.cline/data/workspaces/chat/my-app",
 		"/home/user/.cline/data/workspaces",
+		// A real project merely nested under an app-looking root stays a
+		// project: only the exact `<root>/data/workspaces/chat` shape matches.
+		"/home/user/projects/.autocline/data/workspaces/chat/my-app",
+		"/home/user/autocline/data/workspaces/chat",
 	])("rejects non-chat workspace path %s", (path) => {
 		expect(isChatWorkspacePath(path)).toBe(false);
 	});

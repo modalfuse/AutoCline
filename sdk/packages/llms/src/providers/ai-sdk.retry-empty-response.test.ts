@@ -12,7 +12,6 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 import {
 	createAnthropicProvider,
-	createClineProvider,
 	createOllamaProvider,
 	createOpenAICompatibleProvider,
 	withEmptyResponseRetry,
@@ -178,9 +177,9 @@ describe("openai-compatible wire format (openrouter / cline / custom endpoints)"
 	});
 
 	it.each([
-		"cline",
-		"cline-pass",
-	])("exposes only returned HTTP IDs for %s", async (providerId) => {
+		"openrouter",
+		"openai-compatible",
+	] as const)("exposes only returned HTTP IDs for %s", async (providerId) => {
 		for (const requestId of ["backend-request", undefined]) {
 			const config = {
 				providerId,
@@ -194,7 +193,7 @@ describe("openai-compatible wire format (openrouter / cline / custom endpoints)"
 						},
 					})) as typeof fetch,
 			};
-			const provider = await createClineProvider(config);
+			const provider = await createOpenAICompatibleProvider(config);
 			const events = await collect(
 				await provider.stream(
 					{ ...streamRequest(), providerId },

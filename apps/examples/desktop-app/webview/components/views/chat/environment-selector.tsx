@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Cloud, Laptop, Loader2, Server, Settings } from "lucide-react";
+import { Check, Laptop, Loader2, Server, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,8 +30,11 @@ export type EnvironmentSelectorModel = {
 
 export type EnvironmentSelectorProps = {
 	activeEnvironmentId: string;
+	/** @deprecated Cloud is removed from the env picker; prop kept for callers. */
 	cloudEnabled?: boolean;
+	/** @deprecated Cloud is removed from the env picker; prop kept for callers. */
 	executionTarget?: "local" | "cloud";
+	/** @deprecated Cloud is removed from the env picker; prop kept for callers. */
 	onSelectExecutionTarget?: (target: "local" | "cloud") => void;
 	profiles: RemoteEnvironmentProfile[];
 	loading?: boolean;
@@ -78,8 +81,6 @@ export function buildEnvironmentSelectorModel(
 
 export function EnvironmentSelector({
 	activeEnvironmentId,
-	cloudEnabled = false,
-	executionTarget = "local",
 	onSelectExecutionTarget,
 	profiles,
 	loading = false,
@@ -97,20 +98,14 @@ export function EnvironmentSelector({
 	const [open, setOpen] = useState(false);
 	const pendingEnvironmentId = switchingEnvironmentId ?? internalSwitchingId;
 	const busy = loading || pendingEnvironmentId !== null;
-	const cloudSelected = executionTarget === "cloud";
-	const activeLabel = cloudSelected ? "Cloud" : model.activeLabel;
-	const ActiveIcon = cloudSelected
-		? Cloud
-		: model.activeKind === "remote"
-			? Server
-			: Laptop;
+	const activeLabel = model.activeLabel;
+	const ActiveIcon = model.activeKind === "remote" ? Server : Laptop;
 
 	const selectEnvironment = async (environmentId: string) => {
 		// Clicking Local must save the choice even after an automatic fallback.
 		if (
 			busy ||
-			(!cloudSelected &&
-				environmentId === activeEnvironmentId &&
+			(environmentId === activeEnvironmentId &&
 				environmentId !== LOCAL_WORKSPACE_ENVIRONMENT_ID)
 		)
 			return;
@@ -119,8 +114,8 @@ export function EnvironmentSelector({
 			if (environmentId !== activeEnvironmentId) {
 				await onSelectEnvironment(environmentId);
 			}
-			// Persist the choice only after a successful environment switch.
-			if (cloudSelected || environmentId === LOCAL_WORKSPACE_ENVIRONMENT_ID)
+			// Persist local execution target after a successful environment switch.
+			if (environmentId === LOCAL_WORKSPACE_ENVIRONMENT_ID)
 				onSelectExecutionTarget?.("local");
 		} catch {
 			// The parent owns connection errors and their user-facing presentation;
@@ -163,9 +158,7 @@ export function EnvironmentSelector({
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="start" className="w-72" side="bottom">
 				<DropdownMenuItem
-					aria-current={
-						!cloudSelected && model.local.selected ? "true" : undefined
-					}
+					aria-current={model.local.selected ? "true" : undefined}
 					className="aria-current:bg-purple-500/20 aria-current:focus:bg-purple-500/25"
 					disabled={busy}
 					onSelect={() => void selectEnvironment(model.local.id)}
@@ -173,29 +166,7 @@ export function EnvironmentSelector({
 					<Laptop />
 					<span className="uppercase">{model.local.label}</span>
 					{optionStatus(model.local)}
-					{!cloudSelected && model.local.selected ? (
-						<Check className="ml-auto" />
-					) : null}
-				</DropdownMenuItem>
-
-				<DropdownMenuSeparator />
-				<DropdownMenuItem
-					aria-current={cloudSelected ? "true" : undefined}
-					className="aria-current:bg-purple-500/20 aria-current:focus:bg-purple-500/25"
-					disabled={!cloudEnabled || busy}
-					onSelect={() => {
-						if (!cloudSelected) onSelectExecutionTarget?.("cloud");
-					}}
-				>
-					<Cloud className="size-4" />
-					<span className="uppercase">Cloud</span>
-					{!cloudEnabled ? (
-						<span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
-							Coming soon
-						</span>
-					) : cloudSelected ? (
-						<Check className="ml-auto" />
-					) : null}
+					{model.local.selected ? <Check className="ml-auto" /> : null}
 				</DropdownMenuItem>
 
 				<DropdownMenuSeparator />
@@ -217,9 +188,7 @@ export function EnvironmentSelector({
 				{model.remotes.length > 0 ? (
 					model.remotes.map((option) => (
 						<DropdownMenuItem
-							aria-current={
-								!cloudSelected && option.selected ? "true" : undefined
-							}
+							aria-current={option.selected ? "true" : undefined}
 							className="aria-current:bg-purple-500/20 aria-current:focus:bg-purple-500/25"
 							disabled={busy}
 							key={option.id}
@@ -227,9 +196,7 @@ export function EnvironmentSelector({
 						>
 							<span className="min-w-0 flex-1 truncate">{option.label}</span>
 							{optionStatus(option)}
-							{!cloudSelected && option.selected ? (
-								<Check className="ml-auto" />
-							) : null}
+							{option.selected ? <Check className="ml-auto" /> : null}
 						</DropdownMenuItem>
 					))
 				) : (

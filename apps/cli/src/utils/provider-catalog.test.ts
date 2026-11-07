@@ -19,8 +19,6 @@ describe("listLocalProviders", () => {
 
 		await listLocalProviders(manager);
 
-		expect(mocks.listLocalProviders).toHaveBeenCalledWith(manager, {
-			isClinePassEnabled: true,
-		});
+		expect(mocks.listLocalProviders).toHaveBeenCalledWith(manager);
 	});
 });

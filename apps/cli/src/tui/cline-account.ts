@@ -4,7 +4,6 @@ import {
 	type ClineAccountOrganizationBalance,
 	ClineAccountService,
 	type ClineAccountUser,
-	type ClineSubscriptionPlan,
 	formatProviderOAuthApiKey,
 	getPersistedProviderApiKey,
 	getProviderOAuthCredentialsFromSettings,
@@ -25,8 +24,6 @@ export const CLINE_CREDITS_DASHBOARD_URL =
 	"https://app.cline.bot/dashboard/account?tab=credits";
 
 type ClineAccountConfig = Pick<Config, "apiKey" | "logger" | "providerId">;
-
-const CLINE_PASS_PROVIDER_ID = "cline-pass";
 
 export interface ClineAccountSnapshot {
 	user: ClineAccountUser;
@@ -218,18 +215,6 @@ export async function switchClineAccount(input: {
 	await service.switchAccount(input.organizationId);
 }
 
-export async function loadIndividualSubscriptionPlans(input: {
-	config: ClineAccountConfig;
-	clineApiBaseUrl?: string;
-	clineProviderSettings?: ProviderSettings;
-}): Promise<ClineSubscriptionPlan[]> {
-	const service = await createClineAccountService(input);
-	if (!service) {
-		throw new Error("No Cline account auth token found");
-	}
-	return service.fetchAvailableSubscriptionPlans({ type: "individual" });
-}
-
 export async function loadCurrentUserPlan(input: {
 	config: ClineAccountConfig;
 	clineApiBaseUrl?: string;
@@ -255,43 +240,4 @@ export async function loadCurrentUserPlanFromProviderSettings(input: {
 		throw new Error("No Cline account auth token found");
 	}
 	return service.fetchCurrentUserPlan();
-}
-
-export async function loadIndividualSubscriptionPlansFromProviderSettings(input: {
-	providerSettingsManager: ProviderSettingsManager;
-	clineApiBaseUrl?: string;
-}): Promise<ClineSubscriptionPlan[]> {
-	const service = await createClineAccountService({
-		config: { apiKey: "", logger: undefined, providerId: "cline" },
-		clineApiBaseUrl: input.clineApiBaseUrl,
-		providerSettingsManager: input.providerSettingsManager,
-	});
-	if (!service) {
-		throw new Error("No Cline account auth token found");
-	}
-	return service.fetchAvailableSubscriptionPlans({ type: "individual" });
-}
-
-async function onChangeToClinePass(config: ClineAccountConfig) {
-	try {
-		await switchClineAccount({
-			config: config,
-			organizationId: null,
-		});
-	} catch (error) {
-		config.logger?.debug("Failed to switch ClinePass to personal account", {
-			error,
-		});
-	}
-}
-
-export async function onProviderChange(input: {
-	config: ClineAccountConfig;
-	providerId: string;
-}): Promise<void> {
-	if (input.providerId === CLINE_PASS_PROVIDER_ID) {
-		return onChangeToClinePass(input.config);
-	}
-
-	return;
 }

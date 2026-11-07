@@ -1,11 +1,5 @@
-import {
-	CLINE_DEFAULT_MODEL_ID,
-	CLINE_ENVIRONMENT_ENV,
-	CLINE_ENVIRONMENTS,
-	type GatewayProviderContext,
-} from "@cline/shared";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GENERATED_CLINE_RECOMMENDED_MODELS } from "../catalog/cline-recommended.generated";
+import { type GatewayProviderContext } from "@cline/shared";
+import { describe, expect, it } from "vitest";
 import {
 	BUILTIN_PROVIDER_MANIFESTS_BY_ID,
 	BUILTIN_SPECS,
@@ -15,135 +9,6 @@ import {
 import { getModelsForProvider, getProvider } from "./model-registry";
 import { GENERATED_PROVIDER_SPECS } from "./providers.generated";
 import { resolveAnthropicReasoningRequestPolicy } from "./routing/anthropic-compatible";
-
-function findClineSpec() {
-	const spec = BUILTIN_SPECS.find((s) => s.id === "cline");
-	if (!spec) {
-		throw new Error("cline builtin spec not found");
-	}
-	return spec;
-}
-
-describe("cline builtin spec defaults.baseUrl", () => {
-	const originalEnvironment = process.env[CLINE_ENVIRONMENT_ENV];
-
-	beforeEach(() => {
-		delete process.env[CLINE_ENVIRONMENT_ENV];
-	});
-
-	afterEach(() => {
-		if (originalEnvironment === undefined) {
-			delete process.env[CLINE_ENVIRONMENT_ENV];
-		} else {
-			process.env[CLINE_ENVIRONMENT_ENV] = originalEnvironment;
-		}
-	});
-
-	it("re-resolves baseUrl when CLINE_ENVIRONMENT changes between reads", () => {
-		const spec = findClineSpec();
-
-		expect(spec.defaults?.baseUrl).toBe(
-			`${CLINE_ENVIRONMENTS.production.apiBaseUrl}/api/v1`,
-		);
-
-		process.env[CLINE_ENVIRONMENT_ENV] = "staging";
-		expect(spec.defaults?.baseUrl).toBe(
-			`${CLINE_ENVIRONMENTS.staging.apiBaseUrl}/api/v1`,
-		);
-
-		process.env[CLINE_ENVIRONMENT_ENV] = "local";
-		expect(spec.defaults?.baseUrl).toBe(
-			`${CLINE_ENVIRONMENTS.local.apiBaseUrl}/api/v1`,
-		);
-
-		delete process.env[CLINE_ENVIRONMENT_ENV];
-		expect(spec.defaults?.baseUrl).toBe(
-			`${CLINE_ENVIRONMENTS.production.apiBaseUrl}/api/v1`,
-		);
-	});
-});
-
-describe("cline builtin models", () => {
-	it("defaults to the first recommended model, falling back to the canonical id", () => {
-		expect(findClineSpec().defaultModelId).toBe(
-			GENERATED_CLINE_RECOMMENDED_MODELS.recommended?.[0]?.id ??
-				CLINE_DEFAULT_MODEL_ID,
-		);
-	});
-
-	// The generated list currently starts with the fallback id, so the check
-	// above cannot tell the two branches apart; drive each one explicitly.
-	async function clineDefaultWithRecommended(
-		recommended: { id: string }[],
-	): Promise<string | undefined> {
-		vi.resetModules();
-		vi.doMock("../catalog/cline-recommended.generated", () => ({
-			GENERATED_CLINE_RECOMMENDED_MODELS: { recommended },
-		}));
-		try {
-			const { BUILTIN_SPECS: specs } = await import("./builtins");
-			return specs.find((s) => s.id === "cline")?.defaultModelId;
-		} finally {
-			vi.doUnmock("../catalog/cline-recommended.generated");
-			vi.resetModules();
-		}
-	}
-
-	it("tracks the first recommended model when it differs from the fallback", async () => {
-		await expect(
-			clineDefaultWithRecommended([{ id: "vendor/recommended-first" }]),
-		).resolves.toBe("vendor/recommended-first");
-	});
-
-	it("falls back to the canonical id when the recommended list is empty", async () => {
-		await expect(clineDefaultWithRecommended([])).resolves.toBe(
-			CLINE_DEFAULT_MODEL_ID,
-		);
-	});
-
-	it("prefers Vercel-style Z.ai model ids over equivalent OpenRouter ids", async () => {
-		const models = await getModelsForProvider("cline");
-
-		expect(models["zai/glm-5.2"]).toMatchObject({
-			id: "zai/glm-5.2",
-			name: "GLM 5.2",
-			contextWindow: 1_000_000,
-			maxInputTokens: 1_000_000,
-		});
-		expect(models["zai/glm-5.1"]).toMatchObject({
-			id: "zai/glm-5.1",
-		});
-		expect(models["z-ai/glm-5.2"]).toBeUndefined();
-	});
-
-	it("includes Vercel-only allowlisted models the OpenRouter catalog lacks", async () => {
-		const models = await getModelsForProvider("cline");
-
-		expect(models["meta/muse-spark-1.2-contributor"]).toMatchObject({
-			id: "meta/muse-spark-1.2-contributor",
-			contextWindow: 1_048_576,
-			pricing: expect.objectContaining({ input: 0.1, output: 0.2 }),
-		});
-	});
-
-	it("excludes image-output models without changing upstream catalogs", async () => {
-		const modelId = "google/gemini-3-pro-image";
-		const [clineModels, openRouterModels, vercelModels] = await Promise.all([
-			getModelsForProvider("cline"),
-			getModelsForProvider("openrouter"),
-			getModelsForProvider("vercel-ai-gateway"),
-		]);
-
-		expect(clineModels[modelId]).toBeUndefined();
-		expect(
-			Object.values(clineModels).some(
-				(model) => model.modalities?.output.includes("image") === true,
-			),
-		).toBe(false);
-		expect(openRouterModels[modelId]?.modalities?.output).toContain("image");
-		expect(vercelModels[modelId]?.modalities?.output).toContain("image");
-	});
-});
 
 describe("baked anthropic catalog reasoning options", () => {
 	// Regression guard for the offline fallback: when the live models.dev
@@ -255,59 +120,8 @@ describe("vertex builtin models", () => {
 	});
 });
 
-describe("cline-pass builtin spec", () => {
-	it("registers a distinct Cline-compatible provider with a custom model list", async () => {
-		const models = await getModelsForProvider("cline-pass");
-		const provider = await getProvider("cline-pass");
-
-		expect(provider).toMatchObject({
-			id: "cline-pass",
-			name: "ClinePass",
-			baseUrl: `${CLINE_ENVIRONMENTS.production.apiBaseUrl}/api/v1`,
-			client: "openai-compatible",
-			capabilities: expect.arrayContaining([
-				"oauth",
-				"tools",
-				"reasoning",
-				"prompt-cache",
-			]),
-		});
-		expect(models).toHaveProperty(provider?.defaultModelId ?? "");
-		expect(Object.keys(models).length).toBeGreaterThan(0);
-		for (const model of Object.values(models)) {
-			expect(model.contextWindow).toBeGreaterThan(0);
-			expect(model.maxInputTokens).toBeGreaterThan(0);
-			expect(model.maxTokens).toBeGreaterThan(0);
-			expect(model.capabilities).toEqual(expect.arrayContaining(["tools"]));
-			expect(model.pricing).toBeDefined();
-		}
-	});
-
-	it("defaults to a subscribed-tier model, not a free one", async () => {
-		const models = await getModelsForProvider("cline-pass");
-		const provider = await getProvider("cline-pass");
-
-		expect(provider?.defaultModelId).toMatch(/^cline-pass\//);
-		expect(
-			Object.keys(models).some((id) => !id.startsWith("cline-pass/")),
-		).toBe(true);
-	});
-});
-
 describe("built-in provider metadata", () => {
-	it("declares OpenRouter image transport for Cline-compatible gateways", async () => {
-		await expect(getProvider("cline")).resolves.toMatchObject({
-			metadata: {
-				imageTransport: "openrouter",
-				responseEnvelope: "success-data",
-			},
-		});
-		await expect(getProvider("cline-pass")).resolves.toMatchObject({
-			metadata: {
-				imageTransport: "openrouter",
-				responseEnvelope: "success-data",
-			},
-		});
+	it("declares OpenRouter image transport for OpenRouter-compatible gateways", async () => {
 		await expect(getProvider("openrouter")).resolves.toMatchObject({
 			metadata: { imageTransport: "openrouter" },
 		});
@@ -428,11 +242,11 @@ describe("built-in provider metadata", () => {
 	});
 
 	it("marks popular providers with a provider capability and rank", async () => {
-		await expect(getProvider("cline")).resolves.toMatchObject({
-			name: "Cline Usage-Billing",
+		await expect(getProvider("anthropic")).resolves.toMatchObject({
 			capabilities: expect.arrayContaining(["popular"]),
-			metadata: { popularRank: 1 },
 		});
+		const anthropic = await getProvider("anthropic");
+		expect(typeof anthropic?.metadata?.popularRank).toBe("number");
 		await expect(getProvider("zai")).resolves.not.toMatchObject({
 			capabilities: expect.arrayContaining(["popular"]),
 		});

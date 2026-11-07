@@ -2,10 +2,7 @@ import { fstatSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-	CliMigrationNotice,
-	CliMigrationNoticeOptions,
-} from "./kanban-migration/notice";
+import type { CliMigrationNotice } from "./kanban-migration/notice";
 
 /** Real `fstatSync`: used when tests stub only stdin (fd 0); throwing for every fd breaks imports and session I/O. */
 const fsActual = vi.hoisted(() => ({
@@ -76,11 +73,7 @@ const connectMocks = vi.hoisted(() => ({
 }));
 const migrationNoticeMocks = vi.hoisted(() => ({
 	getClineCliMigrationNotice: vi.fn<
-		(
-			dataDir?: string,
-			env?: NodeJS.ProcessEnv,
-			options?: CliMigrationNoticeOptions,
-		) => CliMigrationNotice | undefined
+		(dataDir?: string, env?: NodeJS.ProcessEnv) => CliMigrationNotice | undefined
 	>(() => undefined),
 	markClineCliMigrationNoticeShown: vi.fn(),
 }));
@@ -891,11 +884,13 @@ describe("runCli lightweight command dispatch", () => {
 		).toHaveBeenCalledWith(undefined, notice.id);
 	});
 
-	it("passes the active ClinePass provider into the migration notice gate", async () => {
-		providerSettingsMocks.getLastUsedProviderSettings.mockReturnValue({
-			provider: "cline-pass",
-			model: "cline-pass/test-model",
-		});
+	it("gates the migration notice with only (dataDir, env) and no wizards list", async () => {
+		// The gate is intentionally two-argument: `getClineCliMigrationNotice`
+		// takes (dataDir, env) and nothing else, so provider selection, the TUI
+		// wizard list, or any extra capability argument must never be forwarded
+		// into it. Pinning the complete argument list also proves the gate is
+		// invoked exactly once with no provider-selection leakage.
+		migrationNoticeMocks.getClineCliMigrationNotice.mockReturnValue(undefined);
 		process.argv = ["bun", "src/index.ts"];
 
 		const { runCli } = await import("./main");
@@ -903,17 +898,74 @@ describe("runCli lightweight command dispatch", () => {
 		await expect(runCli()).resolves.toBeUndefined();
 		expect(
 			migrationNoticeMocks.getClineCliMigrationNotice,
-		).toHaveBeenCalledWith(undefined, process.env, {
-			activeProviderId: "cline-pass",
-		});
+		).toHaveBeenCalledTimes(1);
+		expect(
+			migrationNoticeMocks.getClineCliMigrationNotice.mock.calls,
+		).toHaveLength(1);
+		const noticeArgs = migrationNoticeMocks.getClineCliMigrationNotice.mock
+			.calls[0] as unknown as unknown[];
+		expect(noticeArgs).toEqual([undefined, process.env]);
+		// Strict arity: no third argument (e.g. provider id or wizard list).
+		expect(noticeArgs.length).toBe(2);
+		expect(runtimeMocks.runInteractive).toHaveBeenCalledTimes(1);
+		const [, , , options] = runtimeMocks.runInteractive.mock
+			.calls[0] as unknown as [
+			Record<string, unknown>,
+			unknown,
+			unknown,
+			Record<string, unknown> | undefined,
+		];
+		// No Cline-account wiring is attached when the gate returns no notice.
+		expect(options?.clineApiBaseUrl).toBeUndefined();
+		expect(options?.clineProviderSettings).toBeUndefined();
+		expect(options).toHaveProperty("initialNotice", undefined);
+		expect(options).toHaveProperty("onInitialNoticeShown", undefined);
+	});
+
+	it("passes the active supported provider through to the runtime unchanged", async () => {
+		// `litellm` is a real registered built-in provider
+		// (`BUILT_IN_PROVIDER.LITELLM` in @cline/llms ids.ts), unlike the
+		// removed local `cline`/`cline-pass` account providers. Its selection
+		// must survive startup and reach `runInteractive` verbatim.
+		const litellmSettings = {
+			provider: "litellm",
+			baseUrl: "https://litellm.example.test/v1",
+			model: "openai/gpt-5",
+		};
+		authMocks.normalizeProviderId.mockImplementation(
+			(providerId?: string) => providerId ?? "litellm",
+		);
+		providerSettingsMocks.getLastUsedProviderSettings.mockReturnValue(
+			litellmSettings,
+		);
+		providerSettingsMocks.getProviderSettings.mockReturnValue(litellmSettings);
+		process.argv = ["bun", "src/index.ts"];
+
+		const { runCli } = await import("./main");
+
+		await expect(runCli()).resolves.toBeUndefined();
+		// Supported selection flows through normalizeProviderId verbatim.
+		expect(authMocks.normalizeProviderId).toHaveBeenCalledWith("litellm");
+		expect(
+			migrationNoticeMocks.getClineCliMigrationNotice,
+		).toHaveBeenCalledTimes(1);
+		const noticeArgs = migrationNoticeMocks.getClineCliMigrationNotice.mock
+			.calls[0] as unknown as unknown[];
+		expect(noticeArgs).toEqual([undefined, process.env]);
+		expect(noticeArgs.length).toBe(2);
+		expect(runtimeMocks.runInteractive).toHaveBeenCalledTimes(1);
 		expect(runtimeMocks.runInteractive).toHaveBeenCalledWith(
 			expect.objectContaining({
-				providerId: "cline-pass",
+				providerId: "litellm",
+				modelId: "openai/gpt-5",
 			}),
 			expect.anything(),
 			undefined,
 			expect.objectContaining({
 				initialNotice: undefined,
+				// Only the Cline account provider wires account settings.
+				clineApiBaseUrl: undefined,
+				clineProviderSettings: undefined,
 			}),
 		);
 	});

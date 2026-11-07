@@ -1,7 +1,6 @@
 import {
 	type GatewayProviderContext,
 	type GatewayStreamRequest,
-	isClineProvider,
 	type ModelReasoningOption,
 	resolveReasoningBudgetFromRatio,
 } from "@cline/shared";
@@ -41,18 +40,6 @@ export function normalizeReasoningRequest(
 	const reasoning = request.reasoning;
 	if (!reasoning) {
 		return request;
-	}
-
-	// Cline routes Claude through an OpenRouter-compatible backend. Vercel's
-	// catalog advertises a toggle for Fable 5, but Fable reasoning is mandatory
-	// and the backend rejects an explicit disable. Treat "off" as unsupported
-	// and let the model keep its mandatory default.
-	if (
-		reasoning.enabled === false &&
-		isClineProvider(request.providerId) &&
-		isClaudeFableModelId(request.modelId)
-	) {
-		return { ...request, reasoning: undefined };
 	}
 
 	const options = context.model.reasoningOptions;

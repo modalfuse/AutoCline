@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-	ClineNotSubscribedError,
 	ClineOrgIndividualInferenceSubscriptionError,
-	ClinePassLimitError,
-	getClineNotSubscribedMessage,
 	getClineOrgIndividualInferenceSubscriptionMessage,
 	isClineNotSubscribedMessage,
 	isClineOrgIndividualInferenceSubscriptionMessage,
@@ -108,14 +105,8 @@ describe("extractErrorMessage", () => {
 	});
 });
 
-describe("ClineNotSubscribedError", () => {
-	it("uses the user-facing subscription message", () => {
-		expect(new ClineNotSubscribedError("cline-pass").message).toBe(
-			getClineNotSubscribedMessage(),
-		);
-	});
-
-	it("detects the ClinePass required-plan message", () => {
+describe("isClineNotSubscribedMessage", () => {
+	it("detects the required-plan response message", () => {
 		expect(
 			isClineNotSubscribedMessage(
 				JSON.stringify({
@@ -130,7 +121,7 @@ describe("ClineNotSubscribedError", () => {
 		);
 	});
 
-	it("detects the formatted ClinePass subscription message regardless of URL", () => {
+	it("detects the formatted subscription message regardless of URL", () => {
 		expect(
 			isClineNotSubscribedMessage(
 				"No access to ClinePass subscription models yet. Subscribe to ClinePass, the low cost open weights model coding plan:",
@@ -166,15 +157,7 @@ describe("ClineOrgIndividualInferenceSubscriptionError", () => {
 	});
 });
 
-describe("ClinePassLimitError", () => {
-	it("preserves the dynamic backend limit message", () => {
-		const message =
-			"You have reached your weekly Clinepass limit. The limit resets in 7d, please try again later.";
-		expect(new ClinePassLimitError(message, "cline-pass").message).toBe(
-			message,
-		);
-	});
-
+describe("isClinePassLimitMessage", () => {
 	it("detects ClinePass period limit messages with variable period and reset", () => {
 		expect(
 			isClinePassLimitMessage(

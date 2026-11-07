@@ -161,7 +161,7 @@ describe("buildModelPickerData", () => {
 	it.each([
 		"cline",
 		"other-provider",
-	])("distinguishes colliding names in the %s fallback without hiding model routes", (providerId) => {
+	])("keeps colliding display names short without (id) suffixes in the %s fallback", (providerId) => {
 		const models = [
 			model("cline-pass/deepseek-v4-flash", "DeepSeek V4 Flash"),
 			model("deepseek/deepseek-v4-flash", "DeepSeek V4 Flash"),
@@ -171,19 +171,14 @@ describe("buildModelPickerData", () => {
 		];
 		const { options } = buildModelPickerData(providerId, models);
 		expect(options).toHaveLength(models.length);
-		expect(new Set(options.map((option) => option.label)).size).toBe(
+		expect(new Set(options.map((option) => option.value)).size).toBe(
 			models.length,
 		);
-		for (const entry of models.slice(0, 4)) {
-			expect(options).toContainEqual({
-				label: `${entry.name} (${entry.id})`,
-				value: entry.id,
-			});
+		for (const entry of models) {
+			const match = options.find((option) => option.value === entry.id);
+			expect(match?.label).toBe(entry.name);
 		}
-		expect(options).toContainEqual({
-			label: "Kimi K3",
-			value: "cline-pass/kimi-k3",
-		});
+		expect(options.every((option) => !option.label.includes("("))).toBe(true);
 	});
 
 	it("renders other providers as a flat list with display names", () => {
@@ -196,3 +191,29 @@ describe("buildModelPickerData", () => {
 		]);
 	});
 });
+
+it("shows LiteLLM model_name alone without upstream parentheses", () => {
+	const data = buildModelPickerData("litellm", [
+		{ id: "deepseek-chat", name: "DeepSeek-deepseek-chat" },
+		{ id: "auto-coding", name: "auto-coding" },
+		{
+			id: "79@H3C-4xRTX308012GB/Qwen2.5-14B-AWQ",
+			name: "79@H3C-4xRTX308012GB (openai/Qwen2.5-14B-Instruct-AWQ)",
+		},
+	]);
+	expect(data.options.map((o) => o.label)).toEqual([
+		"79@H3C-4xRTX308012GB/Qwen2.5-14B-AWQ",
+		"deepseek-chat",
+	]);
+	expect(data.options.every((o) => !o.label.includes("("))).toBe(true);
+});
+
+it("never appends (id) when display names collide", () => {
+	const data = buildModelPickerData("openrouter", [
+		{ id: "a/model-1", name: "Same" },
+		{ id: "b/model-2", name: "Same" },
+	]);
+	expect(data.options.map((o) => o.label)).toEqual(["Same", "Same"]);
+	expect(data.options.every((o) => !o.label.includes("("))).toBe(true);
+});
+

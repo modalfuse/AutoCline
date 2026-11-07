@@ -24,21 +24,17 @@ function byLabel(a: SearchComboboxOption, b: SearchComboboxOption): number {
 	return a.label.localeCompare(b.label);
 }
 
-function flatOptions(models: ProviderModel[]): SearchComboboxOption[] {
-	const labelCounts = new Map<string, number>();
-	for (const model of models) {
-		const label = displayName(model);
-		labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
-	}
+function flatOptions(
+	models: ProviderModel[],
+	options?: { shortIdsOnly?: boolean },
+): SearchComboboxOption[] {
+	// Never append " (id)" on collisions — AutoCline shows the short display
+	// name alone (LiteLLM model_name / model.name), not name+(upstream).
 	return models
-		.map((model) => {
-			const label = displayName(model);
-			return {
-				label:
-					(labelCounts.get(label) ?? 0) > 1 ? `${label} (${model.id})` : label,
-				value: model.id,
-			};
-		})
+		.map((model) => ({
+			label: options?.shortIdsOnly ? model.id : displayName(model),
+			value: model.id,
+		}))
 		.sort(byLabel);
 }
 
@@ -139,5 +135,10 @@ export function buildModelPickerData(
 		};
 	}
 
+	if (providerId === "litellm") {
+		// AutoCline: LiteLLM picker shows model_name alone — never "name (upstream)".
+		const filtered = models.filter((model) => model.id !== "auto-coding");
+		return { options: flatOptions(filtered, { shortIdsOnly: true }) };
+	}
 	return { options: flatOptions(models) };
 }

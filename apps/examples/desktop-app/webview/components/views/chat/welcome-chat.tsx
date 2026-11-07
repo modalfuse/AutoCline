@@ -15,7 +15,6 @@ import { AgendaTaskReviewDialog } from "@/components/agenda-task-review-dialog";
 import { useAccount } from "@/contexts/account-context";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { isAgendaTaskExpired, useAgendaTasks } from "@/hooks/use-agenda-tasks";
-import { useClineSignIn } from "@/hooks/use-cline-sign-in";
 import { openPersonalGitHubInstallUrl } from "@/lib/cline-integrations";
 import {
 	type CloudBranchListOptions,
@@ -129,18 +128,6 @@ export function WelcomeScreen({
 				activeOrganization?.organizationId ?? null,
 			])
 		: null;
-	const {
-		signIn,
-		cancelSignIn,
-		signingIn,
-		cancelling,
-		error: signInError,
-	} = useClineSignIn({
-		onSuccess: async () => {
-			invalidateProviderCatalogCache();
-			await refreshAccount();
-		},
-	});
 	const [cloudSetup, setCloudSetup] = useState<CloudSetupState>({
 		status: "unknown",
 		connectUrl: FALLBACK_CONNECT_URL,
@@ -458,16 +445,14 @@ export function WelcomeScreen({
 
 	const cloudOnboardingVariant: CloudOnboardingVariant | null = !cloudModeActive
 		? null
-		: !signedIn
-			? "signed_out"
-			: cloudSetup.status === "not_connected"
-				? "not_connected"
-				: cloudSetup.status === "no_repositories"
-					? "no_repositories"
-					: cloudSetup.status === "error" ||
-							cloudSetup.status === "restore_error"
-						? "error"
-						: null;
+		: cloudSetup.status === "not_connected"
+			? "not_connected"
+			: cloudSetup.status === "no_repositories"
+				? "no_repositories"
+				: cloudSetup.status === "error" ||
+						cloudSetup.status === "restore_error"
+					? "error"
+					: null;
 	// A failed restore must still allow a manual repository selection.
 	const showCloudOnboarding =
 		cloudOnboardingVariant !== null && cloudSetup.status !== "restore_error";
@@ -487,38 +472,31 @@ export function WelcomeScreen({
 
 					<div className="mt-11 flex min-w-0 items-center gap-2">
 						{environmentSelector}
-						<WelcomeWorkspaceControls
-							cloudBranch={cloudBranch}
-							cloudControlsHidden={showCloudOnboarding}
-							cloudEnabled={cloudAgentsEnabled}
-							currentBranch={gitBranch}
-							executionTarget={executionTarget}
-							onCloudBranchChange={onCloudBranchChange}
-							onListCloudBranches={listCloudBranches}
-							onListCloudRepositories={listCloudRepositories}
-							onListGitBranches={onListGitBranches}
-							onOpenExternalUrl={connectGitHub}
-							onPickWorkspaceDirectory={pickWorkspaceDirectory}
-							onRefreshWorkspaces={refreshWorkspaces}
-							onRepoUrlChange={onRepoUrlChange}
-							onSignIn={signIn}
-							onSelectChat={selectChat}
-							onSwitchGitBranch={onSwitchGitBranch}
-							onSwitchWorkspace={switchWorkspace}
-							repoUrl={repoUrl}
-							signedIn={signedIn}
-							signingIn={signingIn}
-							onWorkInChange={onWorkInChange}
-							workIn={workIn}
-							workspaceRoot={workspaceRoot}
-							workspaces={workspaces}
-						/>
-						{signInError ? (
-							<p className="mt-2 text-xs text-destructive">
-								Sign in failed: {signInError}
-							</p>
-						) : null}
-						{terminalToggle ? (
+					<WelcomeWorkspaceControls
+						cloudBranch={cloudBranch}
+						cloudControlsHidden={showCloudOnboarding}
+						cloudEnabled={cloudAgentsEnabled}
+						currentBranch={gitBranch}
+						executionTarget={executionTarget}
+						onCloudBranchChange={onCloudBranchChange}
+						onListCloudBranches={listCloudBranches}
+						onListCloudRepositories={listCloudRepositories}
+						onListGitBranches={onListGitBranches}
+						onOpenExternalUrl={connectGitHub}
+						onPickWorkspaceDirectory={pickWorkspaceDirectory}
+						onRefreshWorkspaces={refreshWorkspaces}
+						onRepoUrlChange={onRepoUrlChange}
+						onSelectChat={selectChat}
+						onSwitchGitBranch={onSwitchGitBranch}
+						onSwitchWorkspace={switchWorkspace}
+						repoUrl={repoUrl}
+						signedIn={signedIn}
+						onWorkInChange={onWorkInChange}
+						workIn={workIn}
+						workspaceRoot={workspaceRoot}
+						workspaces={workspaces}
+					/>
+					{terminalToggle ? (
 							<div className="ml-auto shrink-0">{terminalToggle}</div>
 						) : null}
 					</div>
@@ -528,8 +506,6 @@ export function WelcomeScreen({
 				cloudOnboardingVariant !== null ? (
 					<div className="mt-4 w-full">
 						<CloudOnboardingCard
-							cancelling={cancelling}
-							onCancelSignIn={() => void cancelSignIn()}
 							checking={cloudSetupChecking}
 							onConnect={() =>
 								void (cloudOnboardingVariant === "not_connected"
@@ -537,8 +513,6 @@ export function WelcomeScreen({
 									: openExternalUrl(cloudSetup.connectUrl))
 							}
 							onRefresh={() => void checkCloudSetup()}
-							onSignIn={() => void signIn()}
-							signingIn={signingIn}
 							variant={cloudOnboardingVariant}
 						/>
 					</div>

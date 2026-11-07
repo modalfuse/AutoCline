@@ -88,19 +88,6 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
 	} as unknown as Config;
 }
 
-function mockFetchJson(body: unknown, status = 200): void {
-	vi.stubGlobal(
-		"fetch",
-		vi.fn(
-			async () =>
-				new Response(JSON.stringify(body), {
-					status,
-					headers: { "Content-Type": "application/json" },
-				}),
-		) as unknown as typeof fetch,
-	);
-}
-
 describe("createClineAccountService", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
@@ -121,81 +108,43 @@ describe("createClineAccountService", () => {
 		vi.unstubAllGlobals();
 	});
 
-	it("refreshes persisted Cline OAuth credentials before creating the account service", async () => {
-		vi.spyOn(Date, "now").mockReturnValue(100_000);
-		mockFetchJson({
-			success: true,
-			data: {
-				accessToken: "new-access",
-				refreshToken: "new-refresh",
-				tokenType: "Bearer",
-				expiresAt: "2096-10-02T07:06:40.000Z",
-				userInfo: {
-					subject: "sub-new",
-					email: "new@example.com",
-					name: "New User",
-					clineUserId: "acct-new",
-					accounts: [],
-				},
-			},
-		});
+	it("creates the account service from the persisted account token without an OAuth token exchange", async () => {
+		const fetchSpy = vi.fn();
+		vi.stubGlobal("fetch", fetchSpy as unknown as typeof fetch);
 		coreMocks.getProviderSettings.mockReturnValue({
 			provider: "cline",
-			auth: {
-				accessToken: "workos:old-access",
-				refreshToken: "refresh-token",
-				accountId: "acct-old",
-				expiresAt: 1,
-			},
+			apiKey: "account-token",
 		});
 
 		const { createClineAccountService } = await import("./cline-account");
 		const service = await createClineAccountService({ config: makeConfig() });
 
 		expect(service).toBeDefined();
-		expect(globalThis.fetch).toHaveBeenCalled();
-		expect(coreMocks.saveProviderSettings).toHaveBeenCalledWith(
-			expect.objectContaining({
-				provider: "cline",
-				auth: expect.objectContaining({
-					accessToken: "workos:new-access",
-					refreshToken: "new-refresh",
-					accountId: "acct-new",
-					expiresAt: 4_000_000_000_000,
-				}),
-			}),
-			{ setLastUsed: false, tokenSource: "oauth" },
-		);
+		// The independent cloud account uses the persisted token directly: no
+		// OAuth refresh request is issued and no credentials are rewritten.
+		expect(fetchSpy).not.toHaveBeenCalled();
+		expect(coreMocks.saveProviderSettings).not.toHaveBeenCalled();
 		expect(await coreMocks.serviceOptions[0]?.getAuthToken()).toBe(
-			"workos:new-access",
+			"account-token",
 		);
 	});
 
-	it("asks the user to re-authenticate when Cline OAuth credentials cannot refresh", async () => {
-		vi.spyOn(Date, "now").mockReturnValue(100_000);
-		mockFetchJson(
-			{
-				error: "invalid_grant",
-				error_description: "refresh expired",
-			},
-			401,
-		);
+	it("returns no service when no Cline account token is available", async () => {
+		const fetchSpy = vi.fn();
+		vi.stubGlobal("fetch", fetchSpy as unknown as typeof fetch);
 		coreMocks.getProviderSettings.mockReturnValue({
 			provider: "cline",
-			auth: {
-				accessToken: "workos:old-access",
-				refreshToken: "refresh-token",
-				expiresAt: 1,
-			},
+			apiKey: "",
 		});
 
 		const { createClineAccountService } = await import("./cline-account");
 
 		await expect(
-			createClineAccountService({ config: makeConfig() }),
-		).rejects.toThrow(
-			"Cline account requires re-authentication. Run cline auth cline.",
-		);
+			createClineAccountService({ config: makeConfig({ apiKey: "" }) }),
+		).resolves.toBeUndefined();
+		expect(coreMocks.serviceOptions).toHaveLength(0);
+		expect(fetchSpy).not.toHaveBeenCalled();
+		expect(coreMocks.saveProviderSettings).not.toHaveBeenCalled();
 	});
 });
 
@@ -288,52 +237,6 @@ describe("loadClineAccountSnapshot", () => {
 		expect(snapshot.privacySettingsUrl).toBe(
 			"https://staging-app.cline.bot/dashboard/account?tab=privacy",
 		);
-	});
-});
-
-describe("loadIndividualSubscriptionPlans", () => {
-	beforeEach(() => {
-		vi.restoreAllMocks();
-		vi.unstubAllGlobals();
-		coreMocks.getProviderSettings.mockReset();
-		coreMocks.saveProviderSettings.mockReset();
-		coreMocks.fetchMe.mockReset();
-		coreMocks.fetchBalance.mockReset();
-		coreMocks.fetchOrganizationBalance.mockReset();
-		coreMocks.fetchAvailableSubscriptionPlans.mockReset();
-		coreMocks.fetchCurrentUserPlan.mockReset();
-		coreMocks.serviceOptions.length = 0;
-		telemetryMocks.identifyTelemetryAccount.mockReset();
-	});
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		vi.unstubAllGlobals();
-	});
-
-	it("loads individual subscription plans through the authorized account service", async () => {
-		const plans = [
-			{
-				id: "plan-1",
-				interval: "Monthly",
-				features: { included: ["Major open-weights models"] },
-			},
-		];
-		coreMocks.getProviderSettings.mockReturnValue({
-			provider: "cline",
-			apiKey: "account-token",
-		});
-		coreMocks.fetchAvailableSubscriptionPlans.mockResolvedValue(plans);
-
-		const { loadIndividualSubscriptionPlans } = await import("./cline-account");
-		const result = await loadIndividualSubscriptionPlans({
-			config: makeConfig(),
-		});
-
-		expect(coreMocks.fetchAvailableSubscriptionPlans).toHaveBeenCalledWith({
-			type: "individual",
-		});
-		expect(result).toEqual(plans);
 	});
 });
 

@@ -562,20 +562,6 @@ export const GENERATED_PROVIDER_SPECS: readonly BuiltinSpec[] = [
 		},
 	},
 	{
-		id: "cline-pass",
-		name: "ClinePass",
-		description: "ClinePass model provider from models.dev",
-		family: "openai-compatible",
-		capabilities: ["tools", "reasoning", "prompt-cache"],
-		modelsProviderId: "cline-pass",
-		defaultModelId: "cline-pass/mimo-v2.6-flash",
-		apiKeyEnv: ["CLINE_API_KEY"],
-		docsUrl: "https://docs.cline.bot/getting-started/clinepass",
-		defaults: {
-			baseUrl: "https://api.cline.bot/api/v1",
-		},
-	},
-	{
 		id: "cloudferro-sherlock",
 		name: "CloudFerro Sherlock",
 		description: "CloudFerro Sherlock model provider from models.dev",

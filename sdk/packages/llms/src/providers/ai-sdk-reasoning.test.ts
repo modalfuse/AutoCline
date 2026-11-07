@@ -154,7 +154,7 @@ describe("resolvePortableReasoning", () => {
 });
 
 function wire(
-	adapter: "cline" | "openai-compatible" | "openai" | "anthropic",
+	adapter: "openai-compatible" | "openai" | "anthropic",
 	reasoningOptions: readonly ModelReasoningOption[] | undefined,
 ) {
 	return {
@@ -189,11 +189,11 @@ describe("resolvePortableReasoning against an advertised effort ladder", () => {
 		).toBe(expected);
 	});
 
-	it("snaps for the Cline gateway adapter too", () => {
+	it("snaps an effort ladder for an openai-compatible adapter", () => {
 		expect(
 			resolvePortableReasoning(
-				{ ...request({ effort: "minimal" }), providerId: "cline" },
-				wire("cline", throughXhigh),
+				{ ...request({ effort: "minimal" }), providerId: "custom-provider" },
+				wire("openai-compatible", throughXhigh),
 			),
 		).toBe("low");
 	});
@@ -201,8 +201,8 @@ describe("resolvePortableReasoning against an advertised effort ladder", () => {
 	it("sends a model without max its top advertised level for max", () => {
 		expect(
 			resolvePortableReasoning(
-				{ ...request({ effort: "max" }), providerId: "cline" },
-				wire("cline", throughXhigh),
+				{ ...request({ effort: "max" }), providerId: "custom-provider" },
+				wire("openai-compatible", throughXhigh),
 			),
 		).toBe("xhigh");
 	});

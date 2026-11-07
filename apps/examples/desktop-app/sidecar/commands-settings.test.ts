@@ -1,10 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	clearLiveModelsCatalogCache,
-	resetClineRecommendedModelsCacheForTests,
-} from "@cline/core";
+import { clearLiveModelsCatalogCache } from "@cline/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getCloudSessionManager } from "./cloud-sessions";
 import { handleCommand } from "./commands";
@@ -42,7 +39,6 @@ beforeEach(() => {
 
 afterEach(() => {
 	clearLiveModelsCatalogCache();
-	resetClineRecommendedModelsCacheForTests();
 	vi.unstubAllGlobals();
 	delete process.env.CLINE_CODE_CLOUD_AGENTS;
 	delete process.env.CLINE_DATA_DIR;

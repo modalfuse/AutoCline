@@ -3,6 +3,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -25,7 +26,11 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 beforeEach(() => {
-	sandbox = mkdtempSync(join(tmpdir(), "cline-worktree-"));
+	// macOS resolves `$TMPDIR` (`/var/folders/...`) through the canonical
+	// `/private/var/folders/...` symlink. Git reports the canonical path for
+	// worktree roots, so the fixture uses it too: both paths then describe the
+	// same real location instead of two spellings of one directory.
+	sandbox = realpathSync(mkdtempSync(join(tmpdir(), "cline-worktree-")));
 	repo = join(sandbox, "my-app");
 	git(sandbox, "init", "-q", "-b", "main", repo);
 	git(repo, "commit", "-q", "--allow-empty", "-m", "init");

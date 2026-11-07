@@ -284,7 +284,9 @@ Escalation runbook`,
 		tempRoots.push(tempRoot);
 
 		const originalHomeDir = process.env.HOME?.trim() || homedir();
+		const originalClineDir = process.env.CLINE_DIR;
 		setHomeDir(join(tempRoot, "home"));
+		process.env.CLINE_DIR = join(tempRoot, "home", ".cline");
 		const workspaceRoot = join(tempRoot, "workspace");
 		const globalRulesDir = join(tempRoot, "home", ".cline", "rules");
 		await mkdir(workspaceRoot, { recursive: true });
@@ -316,6 +318,11 @@ Escalation runbook`,
 			expect(rules).toContain("Sign off with GLOBAL-OK.");
 		} finally {
 			setHomeDir(originalHomeDir);
+			if (originalClineDir === undefined) {
+				delete process.env.CLINE_DIR;
+			} else {
+				process.env.CLINE_DIR = originalClineDir;
+			}
 		}
 	});
 

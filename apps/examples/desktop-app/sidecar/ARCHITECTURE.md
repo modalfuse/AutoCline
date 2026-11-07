@@ -81,11 +81,13 @@ sessionManager.subscribe((event) => {
 });
 ```
 
-The packaged backend runs on the bundled Cline CLI and has it start the Hub:
-`cline-cli hub ensure` reuses a compatible healthy Hub or starts one, and the
-Hub daemon is that same CLI binary. Any Hub the backend itself has to start
-later goes through the same binary (`setHubDaemonLauncher`). Startup discovery
-and locking ensure concurrent clients converge on one Hub.
+The packaged backend runs on the bundled Hub runtime and has it start the Hub:
+`autocline-cli hub ensure` reuses a compatible healthy Hub or starts one, and the
+Hub daemon is that same CLI binary (the Cline CLI source compiled as
+`autocline-cli`, so an official `cline-cli` is never replaced). Any Hub the
+backend itself has to start later goes through the same binary
+(`setHubDaemonLauncher`). Startup discovery and locking ensure concurrent
+clients converge on one Hub.
 
 The backend ships Core’s complete `plugin-runtime` artifact beside its script.
 The standalone CLI embeds the same artifact in its read-only Bun filesystem.

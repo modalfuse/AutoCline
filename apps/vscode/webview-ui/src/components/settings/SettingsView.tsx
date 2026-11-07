@@ -140,7 +140,7 @@ const SettingsView = ({ navigationRequest, onDone }: SettingsViewProps) => {
 		[],
 	) // Empty deps - these imports never change
 
-	const { version, extensionVariant, environment, settingsInitialModelTab } = useExtensionState()
+	const { version, extensionVariant, environment } = useExtensionState()
 	const { activeOrganization, clineUser } = useClineAuth()
 
 	const [activeTab, setActiveTab] = useState<string>(initialTarget?.tabId || SETTINGS_TABS[0].id)
@@ -241,12 +241,10 @@ const SettingsView = ({ navigationRequest, onDone }: SettingsViewProps) => {
 		} else if (activeTab === "about") {
 			props.version = version
 			props.extensionVariant = extensionVariant
-		} else if (activeTab === "api-config") {
-			props.initialModelTab = settingsInitialModelTab
 		}
 
 		return <Component {...props} />
-	}, [activeTab, handleResetState, settingsInitialModelTab, version, extensionVariant, TAB_CONTENT_MAP])
+	}, [activeTab, handleResetState, version, extensionVariant, TAB_CONTENT_MAP])
 
 	return (
 		<Tab>

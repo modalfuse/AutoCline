@@ -156,7 +156,7 @@ describe("normalizeReasoningRequest", () => {
 		).toBeUndefined();
 	});
 
-	it("ignores Cline Fable's advertised off control because backend reasoning is mandatory", () => {
+	it("keeps an advertised off control when the backend allows disabling reasoning", () => {
 		const controls: ModelReasoningOption[] = [
 			{ type: "toggle" },
 			{ type: "effort", values: ["low", "medium", "high", "xhigh"] },
@@ -165,18 +165,6 @@ describe("normalizeReasoningRequest", () => {
 			modelId: "anthropic/claude-fable-5",
 		});
 
-		expect(
-			normalizeReasoningRequest(
-				makeRequest(
-					{ enabled: false },
-					{
-						providerId: "cline",
-						modelId: "anthropic/claude-fable-5",
-					},
-				),
-				context,
-			).reasoning,
-		).toBeUndefined();
 		expect(
 			normalizeReasoningRequest(
 				makeRequest(

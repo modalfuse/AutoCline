@@ -1,16 +1,10 @@
 import type { ProviderConfigFieldKey } from "@cline/core";
 import { useKeyboard } from "@opentui/react";
 import type { Dispatch, SetStateAction } from "react";
-import type { ClineModelPickerEntry } from "../../components/model-selector/cline-model-picker";
 import type { SearchableListState } from "../../components/searchable-list";
-import {
-	isOnboardingOAuthProviderId,
-	type OnboardingOAuthProviderId,
-} from "./auth";
+import type { OnboardingOAuthProviderId } from "./auth";
 import { FIELD_ORDER } from "./fields";
 import {
-	type ClinePassSubscriptionOption,
-	type ClinePassSubscriptionStatus,
 	type MenuOption,
 	type OnboardingStep,
 	THINKING_LEVELS,
@@ -26,11 +20,6 @@ export function useOnboardingKeyboard(input: {
 	menuSelected: number;
 	providerList: SearchableListState;
 	modelList: SearchableListState;
-	clineEntries: ClineModelPickerEntry[];
-	clineModelSelected: number;
-	clinePassSubscriptionStatus: ClinePassSubscriptionStatus;
-	clinePassSubscriptionOptions: ClinePassSubscriptionOption[];
-	clinePassSubscriptionSelected: number;
 	thinkingSelected: number;
 	setStep: (step: OnboardingStep) => void;
 	setMenuSelected: Dispatch<SetStateAction<number>>;
@@ -38,25 +27,13 @@ export function useOnboardingKeyboard(input: {
 	byoFields: Partial<Record<ProviderConfigFieldKey, unknown>>;
 	byoFocusedField: ProviderConfigFieldKey;
 	setByoFocusedField: Dispatch<SetStateAction<ProviderConfigFieldKey>>;
-	setDeviceUserCode: (value: string) => void;
-	setDeviceVerifyUrl: (value: string) => void;
-	setDeviceError: (value: string) => void;
-	setDeviceStatus: (value: string) => void;
-	setClineModelSelected: Dispatch<SetStateAction<number>>;
-	setClinePassSubscriptionSelected: Dispatch<SetStateAction<number>>;
 	setThinkingSelected: Dispatch<SetStateAction<number>>;
-	continueFromClinePassSubscription: () => void;
-	refreshClinePassSubscriptionStatus: () => void;
-	openClinePassSubscriptionPage: () => void;
 	abortOAuth: () => void;
-	abortDeviceCode: () => void;
 	resetAuth: () => void;
 	refreshLocalCliStatus: () => void;
 	startOAuthFlow: (providerId: OnboardingOAuthProviderId) => void;
-	startDeviceCodeFlow: (providerId: OnboardingOAuthProviderId) => void;
 	selectProvider: (providerId: string) => void;
 	loadModelsForProvider: (providerId: string) => void;
-	saveClineModelSelection: (modelId: string, modelName: string) => void;
 	saveLocalCliConfig: () => void;
 	saveByoConfig: () => void;
 	saveModelSelection: () => void;
@@ -71,23 +48,7 @@ export function useOnboardingKeyboard(input: {
 		}
 
 		if (key.name === "escape") {
-			if (input.step === "oauth_pending") {
-				input.abortOAuth();
-				input.resetAuth();
-				input.setStep("menu");
-				input.setMenuSelected(0);
-				return;
-			}
-			if (input.step === "device_code") {
-				input.abortDeviceCode();
-				input.setDeviceUserCode("");
-				input.setDeviceVerifyUrl("");
-				input.setDeviceError("");
-				input.setDeviceStatus("");
-				input.setStep("menu");
-				input.setMenuSelected(0);
-				return;
-			}
+			if (input.step === "menu") return;
 			if (input.step === "byo_apikey") {
 				input.resetByoFields();
 				input.setStep("byo_provider");
@@ -102,24 +63,9 @@ export function useOnboardingKeyboard(input: {
 				input.setStep("byo_provider");
 				return;
 			}
-			if (input.step === "cline_pass_subscription") {
-				input.setStep("menu");
-				input.setMenuSelected(0);
-				return;
-			}
-			if (input.step === "cline_model") {
-				input.setStep("menu");
-				input.setMenuSelected(0);
-				return;
-			}
 			if (input.step === "model_picker") {
-				if (input.activeProviderId === "cline") {
-					input.setClineModelSelected(0);
-					input.setStep("cline_model");
-				} else {
-					input.setStep("menu");
-					input.setMenuSelected(0);
-				}
+				input.setStep("menu");
+				input.setMenuSelected(0);
 				return;
 			}
 			if (input.step === "custom_model_id") {
@@ -127,86 +73,14 @@ export function useOnboardingKeyboard(input: {
 				return;
 			}
 			if (input.step === "thinking_level") {
-				if (input.activeProviderId === "cline") {
-					input.setClineModelSelected(0);
-					input.setStep("cline_model");
-				} else {
-					input.setStep("model_picker");
-					input.loadModelsForProvider(input.activeProviderId);
-				}
+				input.setStep("model_picker");
+				input.loadModelsForProvider(input.activeProviderId);
 			}
-			return;
-		}
-
-		if (input.step === "oauth_pending") {
-			if (key.name === "d" && input.oauthProvider === "cline") {
+			if (input.step === "oauth_pending") {
 				input.abortOAuth();
 				input.resetAuth();
-				input.startDeviceCodeFlow("cline");
-			}
-			return;
-		}
-
-		if (input.step === "device_code") return;
-
-		if (input.step === "cline_pass_subscription") {
-			const total = input.clinePassSubscriptionOptions.length;
-			if (total === 0) return;
-			if (key.name === "up" || (key.ctrl && key.name === "p")) {
-				input.setClinePassSubscriptionSelected((s) =>
-					s <= 0 ? total - 1 : s - 1,
-				);
-				return;
-			}
-			if (key.name === "down" || (key.ctrl && key.name === "n")) {
-				input.setClinePassSubscriptionSelected((s) =>
-					s >= total - 1 ? 0 : s + 1,
-				);
-				return;
-			}
-			if (key.name === "return" || key.name === "enter") {
-				const option =
-					input.clinePassSubscriptionOptions[
-						Math.min(input.clinePassSubscriptionSelected, total - 1)
-					];
-				if (!option) return;
-				if (option.value === "subscribe") {
-					input.openClinePassSubscriptionPage();
-				} else if (option.value === "refresh") {
-					if (input.clinePassSubscriptionStatus !== "loading") {
-						input.refreshClinePassSubscriptionStatus();
-					}
-				} else if (option.value === "skip") {
-					input.continueFromClinePassSubscription();
-				} else if (option.value === "back") {
-					input.setStep("menu");
-					input.setMenuSelected(0);
-				}
-			}
-			return;
-		}
-
-		if (input.step === "menu") {
-			if (key.name === "up") {
-				input.setMenuSelected((s) =>
-					s <= 0 ? input.menuOptions.length - 1 : s - 1,
-				);
-				return;
-			}
-			if (key.name === "down") {
-				input.setMenuSelected((s) =>
-					s >= input.menuOptions.length - 1 ? 0 : s + 1,
-				);
-				return;
-			}
-			if (key.name === "return") {
-				const option = input.menuOptions[input.menuSelected];
-				if (!option) return;
-				if (isOnboardingOAuthProviderId(option.value)) {
-					input.startOAuthFlow(option.value);
-				} else {
-					input.setStep("byo_provider");
-				}
+				input.setStep("menu");
+				input.setMenuSelected(0);
 			}
 			return;
 		}
@@ -250,30 +124,6 @@ export function useOnboardingKeyboard(input: {
 						: (idx + 1) % visible.length;
 					const next = visible[nextIdx];
 					if (next) input.setByoFocusedField(next as ProviderConfigFieldKey);
-				}
-			}
-			return;
-		}
-
-		if (input.step === "cline_model") {
-			const total = input.clineEntries.length;
-			if (total === 0) return;
-			if (key.name === "up" || (key.ctrl && key.name === "p")) {
-				input.setClineModelSelected((s) => (s <= 0 ? total - 1 : s - 1));
-				return;
-			}
-			if (key.name === "down" || (key.ctrl && key.name === "n")) {
-				input.setClineModelSelected((s) => (s >= total - 1 ? 0 : s + 1));
-				return;
-			}
-			if (key.name === "return") {
-				const entry = input.clineEntries[input.clineModelSelected];
-				if (!entry) return;
-				if (entry.kind === "model") {
-					input.saveClineModelSelection(entry.model.id, entry.model.name);
-				} else {
-					input.setStep("model_picker");
-					input.loadModelsForProvider(input.activeProviderId);
 				}
 			}
 			return;

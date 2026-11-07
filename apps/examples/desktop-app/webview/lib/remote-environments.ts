@@ -31,7 +31,8 @@ export type RemoteEnvironmentTestResult = {
 
 export type RemoteEnvironmentConnectResult = {
 	profile: RemoteEnvironmentProfile;
-	status: "connected";
+	/** "connecting" = optimistic activate; Hub/SSH finish in the background. */
+	status: "connected" | "connecting";
 	environmentId: string;
 	activeEnvironmentId: string;
 	activeProfileId: string;
@@ -99,6 +100,10 @@ export function createRemoteEnvironmentDraft(
 		user: profile?.user,
 		port: profile?.port,
 		identityFile: profile?.identityFile,
+		// Hub URLs drive the only Hub connection path (no SSH tunnel), so an edit
+		// draft must carry them or saving would silently unpair the profile.
+		...(profile?.hubUrls?.length ? { hubUrls: [...profile.hubUrls] } : {}),
+		...(profile?.hubUrl ? { hubUrl: profile.hubUrl } : {}),
 	};
 }
 
@@ -110,6 +115,9 @@ function trimmedOptional(value: string | undefined): string | undefined {
 export function normalizeRemoteEnvironmentProfile(
 	profile: RemoteEnvironmentProfile,
 ): RemoteEnvironmentProfile {
+	const normalized = (profile.hubUrls ?? [])
+		.map((url) => url.trim())
+		.filter((url, index, all) => url && all.indexOf(url) === index);
 	return {
 		id: trimmedOptional(profile.id),
 		name: profile.name.trim(),
@@ -117,6 +125,10 @@ export function normalizeRemoteEnvironmentProfile(
 		user: trimmedOptional(profile.user),
 		port: profile.port,
 		identityFile: trimmedOptional(profile.identityFile),
+		...(normalized.length > 0 ? { hubUrls: normalized } : {}),
+		...(trimmedOptional(profile.hubUrl)
+			? { hubUrl: trimmedOptional(profile.hubUrl) }
+			: {}),
 	};
 }
 
@@ -125,6 +137,14 @@ export function validateRemoteEnvironmentProfile(
 ): string | undefined {
 	if (!profile.name.trim()) return "Name is required.";
 	if (!profile.host.trim()) return "SSH host is required.";
+	// AutoCline only connects to a Hub directly, so at least one Hub URL is
+	// required; an SSH host alone would have nothing to dial.
+	if (
+		(profile.hubUrls ?? []).filter((url) => url.trim()).length === 0 &&
+		!profile.hubUrl?.trim()
+	) {
+		return "At least one Hub URL is required (for example ws://100.101.163.69:25463/hub).";
+	}
 	if (
 		profile.port !== undefined &&
 		(!Number.isInteger(profile.port) ||

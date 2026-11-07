@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-	createClineProvider,
 	createOpenAICompatibleProvider,
 	createOpenAIProvider,
 	createSapAiCoreProvider,
@@ -103,25 +102,14 @@ describe("provider-ids", () => {
 		);
 	});
 
-	it("registers ClinePass as a distinct Cline-compatible built-in provider", async () => {
-		expect(BUILT_IN_PROVIDER_IDS).toContain("cline-pass");
-		const models = await getModelsForProvider("cline-pass");
-		const provider = await getProvider("cline-pass");
-
-		expect(provider).toMatchObject({
-			id: "cline-pass",
-			name: "ClinePass",
-			client: "openai-compatible",
-		});
-		expect(models).toHaveProperty(provider?.defaultModelId ?? "");
-
+	it("does not expose the removed Cline gateway providers", async () => {
+		expect(BUILT_IN_PROVIDER_IDS).not.toContain("cline");
+		expect(BUILT_IN_PROVIDER_IDS).not.toContain("cline-pass");
 		for (const providerId of ["cline", "cline-pass"]) {
 			const registration = BUILTIN_PROVIDER_REGISTRATIONS.find(
 				(item) => item.manifest.id === providerId,
 			);
-			await expect(registration?.loadProvider?.()).resolves.toMatchObject({
-				createProvider: createClineProvider,
-			});
+			expect(registration).toBeUndefined();
 		}
 	});
 
@@ -147,7 +135,7 @@ describe("provider-ids", () => {
 		});
 	});
 
-	it("registers AI/ML API first after Cline's own providers, with no static attribution", async () => {
+	it("registers AI/ML API as the top-ranked provider, with no static attribution", async () => {
 		expect(BUILT_IN_PROVIDER_IDS).toContain("aimlapi");
 
 		await expect(getProvider("aimlapi")).resolves.toMatchObject({
@@ -165,7 +153,7 @@ describe("provider-ids", () => {
 		const models = await getModelsForProvider("aimlapi");
 		expect(Object.hasOwn(models, "anthropic/claude-sonnet-5")).toBe(true);
 
-		// only Cline's own Usage-Billing and ClinePass rank above it
+		// nothing ranks above aimlapi (3); the highest-ranked providers sit below it
 		const ahead = (
 			await Promise.all(getProviderIds().map((id) => getProvider(id)))
 		)
@@ -173,9 +161,8 @@ describe("provider-ids", () => {
 				const rank = provider?.metadata?.popularRank;
 				return typeof rank === "number" && rank < 3;
 			})
-			.map((provider) => provider?.id)
-			.sort();
-		expect(ahead).toEqual(["cline", "cline-pass"].sort());
+			.map((provider) => provider?.id);
+		expect(ahead).toEqual([]);
 
 		const registration = BUILTIN_PROVIDER_REGISTRATIONS.find(
 			(item) => item.manifest.id === "aimlapi",

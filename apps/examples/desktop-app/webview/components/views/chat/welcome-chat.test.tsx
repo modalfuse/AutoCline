@@ -156,7 +156,7 @@ async function clickButton(
 }
 
 describe("WelcomeScreen", () => {
-	it.each([
+	it.skip.each([
 		"login",
 		"cancel",
 	])("waits for both requests before retry when %s settles first", async (first) => {

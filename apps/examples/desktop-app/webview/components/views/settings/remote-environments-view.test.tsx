@@ -20,6 +20,9 @@ vi.mock("@/components/ui/scroll-area", () => ({
 	),
 }));
 
+// Loopback-only fake Hub URL so form validation passes without any real network.
+const TEST_HUB_URL = "ws://127.0.0.1:25463/hub";
+
 const profile: RemoteEnvironmentProfile = {
 	id: "build-box",
 	name: "Build box",
@@ -27,6 +30,7 @@ const profile: RemoteEnvironmentProfile = {
 	user: "ubuntu",
 	port: 22,
 	identityFile: "~/.ssh/id_ed25519",
+	hubUrls: [TEST_HUB_URL],
 };
 
 let container: HTMLDivElement;
@@ -183,8 +187,18 @@ describe("RemoteEnvironmentsContent", () => {
 			expect(invokeMock).toHaveBeenCalledTimes(2);
 		});
 		expect(invokeMock).toHaveBeenNthCalledWith(2, "upsert_remote_environment", {
-			profile: { ...profile, name: "Build box 2" },
+			profile: {
+				id: profile.id,
+				name: "Build box 2",
+				host: profile.host,
+				user: profile.user,
+				port: profile.port,
+				identityFile: profile.identityFile,
+				hubUrls: [TEST_HUB_URL],
+			},
 		});
+		// Validation must not surface on a profile that carries a Hub URL.
+		expect(container.textContent).not.toContain("At least one Hub URL");
 		expect(container.textContent).toContain("Connected");
 		expect(container.textContent).toContain("Ready");
 	});

@@ -1,16 +1,14 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { resolveClineDataDir } from "@cline/shared/storage";
 import type { JsonRecord } from "../types";
 import { parseF64Value, parseU64Value } from "./common";
 
 function resolveGlobalHookLogPath(): string {
 	const envPath = process.env.CLINE_HOOKS_LOG_PATH?.trim();
 	if (envPath) return envPath;
-	const dataDir =
-		process.env.CLINE_DATA_DIR?.trim() ||
-		join(process.env.HOME ?? process.env.USERPROFILE ?? "", ".cline", "data");
-	return join(dataDir, "logs", "hooks.jsonl");
+	return join(resolveClineDataDir(), "logs", "hooks.jsonl");
 }
 
 export async function readSessionHooks(

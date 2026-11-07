@@ -3,24 +3,26 @@ import { desktopClient, isTauriAvailable } from "@/lib/desktop-client";
 export const APP_ICON_STORAGE_KEY = "cline.code.app-icon.v1";
 
 /**
- * App icon variants selectable in Settings. "midnight" is the icon bundled
- * with the app; the others live in webview/public/app-icons (picker +
- * browser favicon) and src-tauri/icons/app (runtime app icon resources).
+ * AutoCline uses a fixed custom brand icon, not theme-switchable variants.
+ * The runtime icon switching (classic/midnight/hologram/chip) is disabled;
+ * Dock/About/bundle always show the custom autocline-brand-icon.png.
+ * Kept for compatibility but never applied at runtime.
  */
 export const APP_ICONS = [
-	{ id: "classic", label: "Classic" },
-	{ id: "midnight", label: "Midnight" },
-	{ id: "hologram", label: "Hologram" },
-	{ id: "chip", label: "Chip" },
+	{ id: "custom", label: "AutoCline" },
 ] as const;
 
 export type AppIconId = (typeof APP_ICONS)[number]["id"];
 
-export const DEFAULT_APP_ICON: AppIconId = "midnight";
+export const DEFAULT_APP_ICON: AppIconId = "custom";
 
 const RETIRED_APP_ICON_MIGRATIONS = {
-	sunrise: "hologram",
+	sunrise: DEFAULT_APP_ICON,
 	steel: DEFAULT_APP_ICON,
+	classic: DEFAULT_APP_ICON,
+	midnight: DEFAULT_APP_ICON,
+	hologram: DEFAULT_APP_ICON,
+	chip: DEFAULT_APP_ICON,
 } as const satisfies Record<string, AppIconId>;
 
 type RetiredAppIconId = keyof typeof RETIRED_APP_ICON_MIGRATIONS;
@@ -94,12 +96,15 @@ export async function setStoredAppIcon(icon: AppIconId): Promise<void> {
 }
 
 /**
- * Re-applies the persisted choice on launch. The native app icon reverts to
- * the bundled icon on every restart, so the app shell calls this once at boot.
+ * No-op for AutoCline: the custom brand icon is baked into the native bundle
+ * (icon.icns) and never switched at runtime. Clear any leftover Cline theme
+ * preference so the Dock cannot be overwritten by old localStorage entries.
  */
 export async function syncAppIcon(): Promise<void> {
-	const icon = readStoredAppIcon();
-	if (icon !== DEFAULT_APP_ICON) {
-		await applyAppIcon(icon);
+	try {
+		window.localStorage.removeItem(APP_ICON_STORAGE_KEY);
+	} catch {
+		// Storage may be unavailable; no-op is safe.
 	}
+	// Do NOT call applyAppIcon: AutoCline's icon is fixed in the native bundle.
 }

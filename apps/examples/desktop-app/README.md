@@ -239,7 +239,9 @@ sudo dnf install ./Cline_<version>_aarch64.rpm   # Fedora / RHEL (arm64)
 ```
 
 The app installs as `/usr/bin/cline-app` with a `Cline` launcher entry; the
-bundled Cline CLI is `/usr/bin/cline-cli`, and the desktop backend bundle and
+bundled Hub runtime is `/usr/bin/autocline-cli` (it is the Cline CLI source
+compiled under the AutoCline name, so it cannot replace an official
+`/usr/bin/cline-cli`), and the desktop backend bundle and
 SSH remote CLIs live in `/usr/lib/Cline/`. The tray icon needs a StatusNotifier host (KDE, XFCE, and
 GNOME with the AppIndicator extension); without one the app still runs but the
 tray menu is unavailable, and closing the window quits the app instead of
@@ -302,9 +304,9 @@ Startup flow:
 
 1. Tauri starts a persistent local desktop backend and keeps only native window/file-picker/open-path responsibilities.
    In a packaged app the backend is `bin/desktop-backend/index.js`, executed by
-   the bundled Cline CLI (`cline-cli run`); `bun run dev` runs `sidecar/index.ts`
+   the bundled Hub runtime (`autocline-cli run`); `bun run dev` runs `sidecar/index.ts`
    with Bun directly.
-2. The backend runs `cline-cli hub ensure`, which reuses a compatible healthy
+2. The backend runs `autocline-cli hub ensure`, which reuses a compatible healthy
    shared Cline Hub on loopback or starts one (the Hub daemon is the same CLI
    binary). The backend then attaches to the Hub and exposes one websocket
    transport (`/transport`) for desktop commands, queries, and pushed events.

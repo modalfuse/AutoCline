@@ -551,7 +551,7 @@ describe("ProviderCatalog Phase 3.5 listProviders", () => {
 		})
 		expect(listings[0]).not.toHaveProperty("models")
 		expect(mocks.listLocalProviders).toHaveBeenCalledTimes(1)
-		expect(mocks.listLocalProviders).toHaveBeenCalledWith(expect.anything(), { isClinePassEnabled: true })
+		expect(mocks.listLocalProviders).toHaveBeenCalledWith(expect.anything())
 	})
 
 	it("passes the SDK's subscription usage-cost display through to listings", async () => {

@@ -1,17 +1,21 @@
-import { cpSync, existsSync, rmSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { $ } from "bun";
 import {
 	compileCliBinary,
 	installOpenTuiNativeVariants,
 } from "../../../cli/script/compile-binary";
+import { buildChildEnv, RELEASE_BUILD_ENV } from "./build-env-hygiene";
 import { telemetryDefineArgs } from "./telemetry-define-args";
 
 // The desktop app ships two runtime artifacts and no app-specific executable:
 //
-// - The Cline CLI, compiled self-contained for this target (Tauri externalBin
-//   `bin/cline-cli`). `cline-cli hub ensure` starts or reuses the CLI-managed
-//   Hub, and the Hub daemon is that same binary.
+// - The AutoCline Hub runtime, compiled self-contained for this target (Tauri
+//   externalBin `bin/autocline-cli`). It is the Cline CLI source built with the
+//   AutoCline name `autocline-cli`, so it installs beside the official Cline
+//   app's `/usr/bin/cline-cli` and `/Applications/Cline.app/Contents/MacOS/cline-cli`
+//   instead of replacing it. `autocline-cli hub ensure` starts or reuses the
+//   CLI-managed Hub, and the Hub daemon is that same binary.
 // - The desktop backend (sidecar/ sources: the UI command router plus its
 //   HTTP/WebSocket server) as one JS bundle, executed on the CLI's embedded
 //   runtime. It attaches to the Hub as an ordinary client.
@@ -22,9 +26,68 @@ import { telemetryDefineArgs } from "./telemetry-define-args";
 const APP_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const BIN_DIR = "src-tauri/bin";
-export const DESKTOP_CLI_NAME = "cline-cli";
+export const DESKTOP_CLI_NAME = "autocline-cli";
 export const DESKTOP_BACKEND_BUNDLE = `${BIN_DIR}/desktop-backend/index.js`;
 export const REMOTE_CLI_DIR = `${BIN_DIR}/remote-helpers`;
+
+/**
+ * Fails the build when one of the names the sanitizer withheld left a value
+ * anywhere in the produced artifacts. Values come from this process's env (which
+ * was sanitized before building) and are compared in memory only — nothing is
+ * printed except the variable name and the offending file.
+ */
+function assertNoWithheldCredentialsInArtifacts(
+	names: readonly string[],
+): void {
+	const wanted = names
+		.map((name) => ({ name, value: process.env[name] }))
+		.filter(
+			(entry): entry is { name: string; value: string } =>
+				typeof entry.value === "string" && entry.value.length >= 8,
+		);
+	if (wanted.length === 0) {
+		return;
+	}
+	const leaks: string[] = [];
+	const scan = (file: string): void => {
+		const data = readFileSync(file);
+		for (const { name, value } of wanted) {
+			if (data.includes(Buffer.from(value))) {
+				leaks.push(`${name} -> ${file}`);
+			}
+		}
+	};
+	for (const file of walkArtifactFiles(`${APP_ROOT}/${BIN_DIR}`)) {
+		scan(file);
+	}
+	for (const file of walkArtifactFiles(`${APP_ROOT}/src-tauri/target/release`)) {
+		if (
+			!/\.(app|dylib|exe|msi|deb|rpm)$|\/Contents\/MacOS\/|\/Contents\/Resources\//.test(
+				file,
+			)
+		) {
+			continue;
+		}
+		scan(file);
+	}
+	if (leaks.length > 0) {
+		throw new Error(
+			`build: withheld credential(s) still present in artifacts: ${leaks.join(", ")}`,
+		);
+	}
+	console.log(
+		`build: no withheld credential values found in artifacts (checked ${wanted.length} name(s))`,
+	);
+}
+
+function walkArtifactFiles(root: string): string[] {
+	if (!existsSync(root)) {
+		return [];
+	}
+	return [...new Bun.Glob("**/*").scanSync({ cwd: root, onlyFiles: true })].map(
+		(relativePath) => `${root}/${relativePath}`,
+	);
+}
 
 const resolveTargetTriple = async (): Promise<string> => {
 	const fromEnv = process.env.TAURI_ENV_TARGET_TRIPLE ?? process.env.TARGET;
@@ -83,18 +146,20 @@ const compileDesktopCli = async (
 		// intranet endpoints signed by a corporate CA (LiteLLM proxies, MITM
 		// firewalls) fails with "unable to get local issuer certificate". Bake
 		// --use-system-ca in so the Hub also trusts the OS Keychain/cert store,
-		// as the npm wrapper does. `BUN_BE_BUN=1 cline-cli run` ignores baked-in
+		// as the npm wrapper does. `BUN_BE_BUN=1 autocline-cli run` ignores baked-in
 		// flags, so main.rs passes it again when launching the backend.
 		execArgv: ["--use-system-ca"],
 	});
 	return outfile;
 };
 
-const bundleDesktopBackend = async (): Promise<void> => {
+const bundleDesktopBackend = async (
+	env: Record<string, string> = process.env as Record<string, string>,
+): Promise<void> => {
 	// Telemetry config must be inlined into the bundle: a packaged app launched
 	// from Finder/the Dock has no OTEL_* env at runtime, so without this the
 	// backend silently ships with telemetry disabled. Verify with
-	// `BUN_BE_BUN=1 cline-cli run <bundle> --telemetry-selfcheck`.
+	// `BUN_BE_BUN=1 autocline-cli run <bundle> --telemetry-selfcheck`.
 	// The script runner does not mount the CLI's bunfs. Ship the same runtime
 	// artifact beside the backend, just as npm and VS Code hosts do.
 	const runtime = `${APP_ROOT}/${BIN_DIR}/desktop-backend/plugin-runtime`;
@@ -102,8 +167,15 @@ const bundleDesktopBackend = async (): Promise<void> => {
 	cpSync(`${REPO_ROOT}/sdk/packages/core/dist/plugin-runtime`, runtime, {
 		recursive: true,
 	});
-	const defines = telemetryDefineArgs();
-	await $`bun build ./sidecar/index.ts --target bun --minify ${defines} --outfile ${DESKTOP_BACKEND_BUNDLE}`;
+	// Read from the already-sanitized env only: nothing credential-shaped can
+	// reach the `--define` map, which is the sole inlining path Bun honors for
+	// `process.env.X` (verified with sentinel builds, see build-env-hygiene).
+	const defines = telemetryDefineArgs(env, {
+		release: env[RELEASE_BUILD_ENV] === "1",
+	});
+	await $`bun build ./sidecar/index.ts --target bun --minify ${defines} --outfile ${DESKTOP_BACKEND_BUNDLE}`.env(
+		env,
+	);
 };
 
 // Each compiled CLI embeds a full Bun runtime (~100 MB), and both Linux copies
@@ -158,12 +230,25 @@ const hasOpenTuiNativeVariant = (os: string, arch: string): boolean =>
 	].length > 0;
 
 const main = async () => {
+	// Strip credential-looking variables from this process before anything
+	// builds: `bun build --define` (telemetry/OTEL) and the compiled CLI's
+	// define map only inline what is present here, so this is the single place
+	// a key could become an artifact literal. Names only are reported.
+	const buildEnv = buildChildEnv();
+	if (buildEnv.removed.length > 0 || buildEnv.inlined.length > 0) {
+		console.log(
+			`build: withholding ${buildEnv.removed.length} credential and ${buildEnv.inlined.length} telemetry variable(s) from build children`,
+		);
+	}
+	for (const name of buildEnv.removed) {
+		delete process.env[name];
+	}
 	// The CLI, its Hub daemon, and the backend bundle must all carry the same
 	// SDK build identity, so build the SDK packages they bundle once, first.
-	await $`bun run build:sdk`.cwd(REPO_ROOT);
+	await $`bun run build:sdk`.cwd(REPO_ROOT).env(buildEnv.env);
 	process.chdir(APP_ROOT);
 	const targetTriple = await resolveTargetTriple();
-	await $`mkdir -p ${BIN_DIR}/desktop-backend ${REMOTE_CLI_DIR}`;
+	await $`mkdir -p ${BIN_DIR}/desktop-backend ${REMOTE_CLI_DIR}`.env(buildEnv.env);
 	// Every build cross-compiles the Linux SSH copies (and macOS builds both
 	// architectures), which needs the target platforms' OpenTUI native
 	// packages in addition to the host's.
@@ -180,13 +265,15 @@ const main = async () => {
 	if (needed.some(([os, arch]) => !hasOpenTuiNativeVariant(os, arch))) {
 		await installOpenTuiNativeVariants();
 	}
-	await bundleDesktopBackend();
+	await bundleDesktopBackend(buildEnv.env);
 	if (targetTriple === "universal-apple-darwin") {
 		await buildUniversalMacCli();
 	} else {
 		await compileDesktopCli(targetTriple);
 	}
 	await buildRemoteClis();
+	// Last step: prove nothing we withheld reappears inside a shipped artifact.
+	assertNoWithheldCredentialsInArtifacts(buildEnv.removed);
 };
 
 if (import.meta.main) {

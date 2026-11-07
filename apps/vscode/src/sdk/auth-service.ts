@@ -11,8 +11,7 @@
 import type { ITelemetryService, OAuthCredentials, ProviderSettings } from "@cline/core"
 import {
 	createOAuthClientCallbacks,
-	getProviderAuthStorageId,
-	getValidClineCredentials,
+	getValidClineCredentials as getSdkValidClineCredentials,
 	hashSecret,
 	loginClineOAuth,
 	loginOcaOAuth,
@@ -187,21 +186,19 @@ function writeClineCredentials(credentials: {
 			auth.expiresAt = credentials.expiresAt
 		}
 
-		// Token refreshes and startup restores also land here. Only claim the
-		// last-used slot when the current selection isn't already a provider
-		// backed by this credential entry (cline-pass stores under "cline") —
-		// otherwise every refresh resets a ClinePass selection back to
-		// usage-billing in the shared providers.json (#13501).
-		const lastUsedProvider = manager.read().lastUsedProvider
-		const setLastUsed = getProviderAuthStorageId(lastUsedProvider ?? "") !== "cline"
-
+		// Writing Cline credentials is NEVER a provider selection. Token
+		// refreshes, startup restores, user-initiated OAuth logins and auth
+		// callbacks all land here, and none of them may claim the last-used
+		// slot: doing so silently rewrites the user's configured default
+		// provider (e.g. litellm) back to "cline" on every refresh. Only the
+		// auth/updatedAt/tokenSource fields of providers.cline should change.
 		manager.saveProviderSettings(
 			{
 				...(existing ?? { provider: "cline" }),
 				provider: "cline",
 				auth: auth as { accessToken?: string; refreshToken?: string; accountId?: string; metadata?: AuthMetadata },
 			},
-			{ tokenSource: "oauth", setLastUsed },
+			{ tokenSource: "oauth", setLastUsed: false },
 		)
 		sdkDebug(
 			`[SdkAuthService] writeClineCredentials: wrote (accessHash=${hashSecret(credentials.accessToken)}, refreshHash=${hashSecret(credentials.refreshToken)}, expiresAt=${credentials.expiresAt}, sessionStartedAtMs=${sessionStartedAtMs})`,
@@ -351,7 +348,7 @@ export class AuthService {
 			return null
 		}
 
-		return getValidClineCredentials(
+		return getSdkValidClineCredentials(
 			this.toOAuthCredentials(authInfo),
 			{ apiBaseUrl: ClineEnv.config().apiBaseUrl, telemetry: this._telemetry },
 			{ forceRefresh: options?.forceRefresh },

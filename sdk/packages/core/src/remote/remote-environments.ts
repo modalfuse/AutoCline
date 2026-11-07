@@ -12,25 +12,28 @@ import {
 	rm,
 	writeFile,
 } from "node:fs/promises";
-import { createConnection, createServer } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import {
-	CLINE_HUB_LAUNCHER_CLIENT_ENV,
-	CLINE_HUB_LAUNCHER_TRANSPORT_ENV,
-	CLINE_HUB_LAUNCHER_VERSION_ENV,
-	getClineClientIdentity,
-} from "@cline/shared";
+import { URL } from "node:url";
 import { resolveClineDataDir } from "@cline/shared/storage";
-import { requestHubShutdown } from "../hub/client";
+import { requestHubShutdown, verifyHubConnection } from "../hub/client";
 
 export interface RemoteEnvironmentProfile {
 	id: string;
 	name: string;
+	/** SSH destination used for git/file operations on the remote host. */
 	host: string;
 	user?: string;
 	port?: number;
 	identityFile?: string;
+	/**
+	 * Stable Hub URLs the desktop dials directly, in priority order (typically
+	 * the host's Tailscale address and, on the host itself, loopback). This is
+	the ONLY Hub connection path: there is no SSH tunnel or localhost forward.
+	 */
+	hubUrls?: string[];
+	/** Legacy single Hub URL; folded into `hubUrls` when the session starts. */
+	hubUrl?: string;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -42,6 +45,8 @@ export interface RemoteEnvironmentInput {
 	user?: string;
 	port?: number;
 	identityFile?: string;
+	hubUrls?: string[];
+	hubUrl?: string;
 }
 
 export type RemoteEnvironmentState =
@@ -66,13 +71,19 @@ export interface RemoteEnvironmentConnection {
 	profile: RemoteEnvironmentProfile;
 	profileId: string;
 	state: "connected";
+	/** The configured Hub URL the desktop is dialing (direct, never a tunnel). */
 	endpoint: string;
 	authToken: string;
 	workspaceRoot: string;
 	homeDir: string;
 	platform: "linux" | "darwin";
 	arch: "x64" | "arm64";
+	/** The Hub URL as seen from the remote host (same host as `endpoint`). */
 	remoteHubUrl: string;
+	/**
+	 * Port of the Hub as bound on the remote host. Deprecated: kept for
+	 * compatibility with clients that read it; no local forward exists.
+	 */
 	localPort: number;
 	connectedAt: string;
 }
@@ -94,17 +105,6 @@ export interface RemoteHelperTarget {
 	arch: "x64" | "arm64";
 }
 
-export interface RemoteTunnelProcess {
-	readonly pid?: number;
-	readonly exitCode: number | null;
-	kill(signal?: NodeJS.Signals): boolean;
-	once(
-		event: "exit",
-		listener: (code: number | null, signal: NodeJS.Signals | null) => void,
-	): unknown;
-	once(event: "error", listener: (error: Error) => void): unknown;
-}
-
 export interface RemoteProcessOptions {
 	timeoutMs: number;
 	inputFile?: string;
@@ -122,13 +122,12 @@ export interface RemoteEnvironmentDependencies {
 		args: string[],
 		options: RemoteProcessOptions,
 	): Promise<RemoteCommandResult>;
-	spawnTunnel(executable: string, args: string[]): RemoteTunnelProcess;
-	waitForTunnel(
-		port: number,
-		tunnel: RemoteTunnelProcess,
-		timeoutMs: number,
-	): Promise<void>;
-	reservePort(): Promise<number>;
+	/**
+	 * Probes a configured Hub URL directly with the token the remote helper
+	 * published. There is no tunnel equivalent on purpose: a Hub the desktop
+	 * cannot reach directly is an error, not something to route around.
+	 */
+	verifyHubConnection(url: string, authToken: string): Promise<boolean>;
 	hashFile(path: string): Promise<string>;
 	resolveHelperBinary(target: RemoteHelperTarget): Promise<string | undefined>;
 	fileReadable(path: string): Promise<boolean>;
@@ -143,8 +142,6 @@ export interface RemoteEnvironmentServiceOptions {
 	knownHostsPath?: string;
 	connectTimeoutSeconds?: number;
 	commandTimeoutMs?: number;
-	uploadTimeoutMs?: number;
-	tunnelTimeoutMs?: number;
 	hubShutdownTimeoutMs?: number;
 	helperBinaryPath?: string;
 	helperBinaryDirectory?: string;
@@ -165,10 +162,23 @@ interface PendingHubCleanup {
 	discoveryPath: string;
 }
 
+export interface SharedHubCredential {
+	endpoint: string;
+	authToken: string;
+	home: string;
+	platform: RemoteInspection["platform"];
+	arch: RemoteInspection["arch"];
+}
+
 interface ManagedConnection {
-	cleanup: PendingHubCleanup;
+	/**
+	 * Present only when this client started a private remote Hub. Direct
+	 * hubUrls connections reuse a durable shared Hub and must not stop it.
+	 */
+	cleanup?: PendingHubCleanup;
+	/** False when dialing a pre-existing Hub named in hubUrls. */
+	ownsRemoteHub: boolean;
 	connection: RemoteEnvironmentConnection;
-	tunnel: RemoteTunnelProcess;
 }
 
 const PROFILE_FILE_VERSION = 1;
@@ -176,28 +186,100 @@ const PROFILE_FILE_VERSION = 1;
 // whole bastion hop has to finish within it.
 const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30;
 const DEFAULT_COMMAND_TIMEOUT_MS = 60_000;
-const DEFAULT_UPLOAD_TIMEOUT_MS = 5 * 60_000;
-const DEFAULT_TUNNEL_TIMEOUT_MS = 40_000;
 const DEFAULT_HUB_SHUTDOWN_TIMEOUT_MS = 2_000;
 const REMOTE_HELPER_DIRECTORY = ".cline/remote";
-const REMOTE_DISCOVERY_DIRECTORY = ".cline/data/remote";
 const REMOTE_INSPECTION_SENTINEL = "CLINE_REMOTE_INSPECT_V1";
+const HUB_PROTOCOLS = new Set(["ws:", "wss:"]);
+
+function normalizeHubUrl(raw: string | undefined): string | undefined {
+	const trimmed = raw?.trim();
+	if (!trimmed) {
+		return undefined;
+	}
+	try {
+		const parsed = new URL(trimmed);
+		return HUB_PROTOCOLS.has(parsed.protocol) ? parsed.toString() : trimmed;
+	} catch {
+		return trimmed;
+	}
+}
+
+function hasHubField(input: RemoteEnvironmentInput): boolean {
+	return input.hubUrls !== undefined;
+}
+
+function normalizeHubUrlList(raw: string[] | undefined): string[] {
+	const urls: string[] = [];
+	for (const candidate of raw ?? []) {
+		const normalized = normalizeHubUrl(candidate);
+		if (normalized && !urls.includes(normalized)) {
+			urls.push(normalized);
+		}
+	}
+	return urls;
+}
+
+/**
+ * The ordered Hub URLs a profile connects through (AutoCline §9.3.1): only the
+ * configured `hubUrls`/`hubUrl`, de-duplicated. An empty list means the profile
+ * is not Hub-mode, and connecting it is refused rather than tunnelled.
+ */
+export function resolveRemoteHubUrls(
+	profile: Pick<RemoteEnvironmentProfile, "hubUrls" | "hubUrl">,
+): string[] {
+	const urls: string[] = [];
+	for (const candidate of [...(profile.hubUrls ?? []), profile.hubUrl]) {
+		const normalized = normalizeHubUrl(candidate);
+		if (normalized && !urls.includes(normalized)) {
+			urls.push(normalized);
+		}
+	}
+	return urls;
+}
+
+function hubUrlPort(url: string | undefined): number {
+	if (!url) {
+		return 0;
+	}
+	try {
+		const parsed = new URL(url);
+		return parsed.port
+			? Number(parsed.port)
+			: parsed.protocol === "wss:"
+				? 443
+				: 80;
+	} catch {
+		return 0;
+	}
+}
 
 export class RemoteEnvironmentService {
 	private readonly profilesPath: string;
-	private readonly ownerId = randomUUID();
 	private readonly sshPath: string;
 	private readonly knownHostsPath?: string;
 	private readonly connectTimeoutSeconds: number;
 	private readonly commandTimeoutMs: number;
-	private readonly uploadTimeoutMs: number;
-	private readonly tunnelTimeoutMs: number;
 	private readonly hubShutdownTimeoutMs: number;
+	/** Optional absolute helper path on the *remote* host (never uploaded). */
+	private readonly remoteHelperOverridePath?: string;
 	private readonly dependencies: RemoteEnvironmentDependencies;
 	private readonly onStatusChange?: (status: RemoteEnvironmentStatus) => void;
-	private readonly onConnectionLost?: (status: RemoteEnvironmentStatus) => void;
+	/**
+	 * Kept for API compatibility. Direct Hub connections report a lost Hub
+	 * through the status change (`onStatusChange`) instead, because the desktop
+	 * observes the socket directly and there is no tunnel process to watch.
+	 */
+	protected readonly onConnectionLost?: (
+		status: RemoteEnvironmentStatus,
+	) => void;
 	private readonly statuses = new Map<string, RemoteEnvironmentStatus>();
 	private readonly connections = new Map<string, ManagedConnection>();
+	/** Auth for durable hubUrls Hubs — skip SSH on reconnect when still valid. */
+	private readonly sharedHubCredentialCache = new Map<
+		string,
+		SharedHubCredential
+	>();
+	private sharedHubCredentialHydrated = false;
 	private activeProfileId: string | undefined;
 	private mutationTail: Promise<void> = Promise.resolve();
 
@@ -222,10 +304,12 @@ export class RemoteEnvironmentService {
 			options.connectTimeoutSeconds ?? DEFAULT_CONNECT_TIMEOUT_SECONDS;
 		this.commandTimeoutMs =
 			options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
-		this.uploadTimeoutMs = options.uploadTimeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS;
-		this.tunnelTimeoutMs = options.tunnelTimeoutMs ?? DEFAULT_TUNNEL_TIMEOUT_MS;
 		this.hubShutdownTimeoutMs =
 			options.hubShutdownTimeoutMs ?? DEFAULT_HUB_SHUTDOWN_TIMEOUT_MS;
+		// Same env can name a local hash source *or* a pre-installed remote path;
+		// ensureHelper only uses it after checking the remote with `test -x`.
+		this.remoteHelperOverridePath =
+			options.helperBinaryPath ?? env.CLINE_REMOTE_HELPER_BINARY;
 		this.onStatusChange = options.onStatusChange;
 		this.onConnectionLost = options.onConnectionLost;
 		this.dependencies = { ...defaults, ...options.dependencies };
@@ -261,6 +345,14 @@ export class RemoteEnvironmentService {
 				);
 			}
 			const profile: RemoteEnvironmentProfile = {
+				// Hub URLs are only cleared when the caller explicitly sends an empty
+				// list; a rename that omits them keeps the existing endpoints.
+				...(existing?.hubUrls && !hasHubField(input)
+					? { hubUrls: existing.hubUrls }
+					: {}),
+				...(existing?.hubUrl && input.hubUrl === undefined
+					? { hubUrl: existing.hubUrl }
+					: {}),
 				...normalized,
 				id: existing?.id ?? normalized.id ?? this.dependencies.randomId(),
 				createdAt: existing?.createdAt ?? now,
@@ -307,6 +399,7 @@ export class RemoteEnvironmentService {
 		this.setStatus(id, "testing", "Testing SSH connection");
 		try {
 			const inspection = await this.inspectRemote(profile);
+			await this.validateDirectory(profile, inspection.home);
 			return this.setStatus(
 				id,
 				"available",
@@ -339,100 +432,122 @@ export class RemoteEnvironmentService {
 		}
 
 		this.setStatus(id, "connecting", "Connecting to remote environment");
-		let bootstrap: { helper: string; discoveryPath: string } | undefined;
-		let pendingTunnel: RemoteTunnelProcess | undefined;
 		try {
+			const hubUrls = resolveRemoteHubUrls(profile);
+			if (hubUrls.length === 0) {
+				throw new Error(
+					`Remote environment "${profile.name}" has no hubUrls. AutoCline connects to the Hub directly at a configured URL ` +
+						'(for example ws://100.101.163.69:25463/hub) and never opens an SSH tunnel; add "hubUrls" to the profile.',
+				);
+			}
+			const endpoint = hubUrls[0] as string;
+
+			await this.hydrateSharedHubCredentials();
+			// Fast path: reuse a verified shared-Hub token — no SSH round-trips.
+			const cached = this.sharedHubCredentialCache.get(id);
+			if (
+				cached &&
+				cached.endpoint === endpoint &&
+				(await this.dependencies.verifyHubConnection(
+					endpoint,
+					cached.authToken,
+				))
+			) {
+				const connectedAt = this.dependencies.now().toISOString();
+				const connection: RemoteEnvironmentConnection = {
+					profile: { ...profile },
+					profileId: id,
+					state: "connected",
+					endpoint,
+					authToken: cached.authToken,
+					workspaceRoot: cached.home,
+					homeDir: cached.home,
+					platform: cached.platform,
+					arch: cached.arch,
+					remoteHubUrl: `ws://127.0.0.1:${hubUrlPort(endpoint) || 25463}/hub`,
+					localPort: hubUrlPort(endpoint),
+					connectedAt,
+				};
+				const managed: ManagedConnection = {
+					connection,
+					ownsRemoteHub: false,
+				};
+				this.connections.set(id, managed);
+				this.activeProfileId = id;
+				this.setStatus(id, "connected", "Connected", {
+					platform: cached.platform,
+					arch: cached.arch,
+					home: cached.home,
+				});
+				if (previousManaged && previousManaged !== managed) {
+					const sameHub =
+						previousManaged.connection.authToken === connection.authToken &&
+						previousManaged.connection.endpoint === connection.endpoint;
+					if (!sameHub) {
+						await this.stopManagedHub(previousManaged);
+					}
+				}
+				return { ...connection, profile: { ...connection.profile } };
+			}
+
+			// hubUrls mode: no helper ensure. Skip validateDirectory — inspect already
+			// returned $HOME, which always exists. Two SSH calls remain (inspect +
+			// auth lookup); reconnects hit the disk/memory credential cache above.
 			const inspection = await this.inspectRemote(profile);
-			await this.validateDirectory(profile, inspection.home);
-			const remoteHelper = await this.ensureHelper(profile, inspection);
-
-			const discoveryPath = joinRemote(
-				inspection.home,
-				`${REMOTE_DISCOVERY_DIRECTORY}/${this.ownerId}-${createHash("sha256").update(profile.id).digest("hex").slice(0, 16)}.json`,
-			);
-			bootstrap = { helper: remoteHelper, discoveryPath };
-			const ensureResult = await this.execRemote(
+			const hub = await this.resolveSharedRemoteHub(
 				profile,
-				remoteHubEnsureCommand(remoteHelper, inspection.home, discoveryPath),
+				inspection.home,
+				endpoint,
 			);
-			const hub = parseRemoteHubResult(ensureResult.stdout);
-			const localPort = await this.dependencies.reservePort();
-			const tunnel = this.dependencies.spawnTunnel(
-				this.sshPath,
-				this.buildTunnelArgs(profile, localPort, hub.port),
-			);
-			pendingTunnel = tunnel;
+			const remoteHubUrl = `ws://127.0.0.1:${hub.port}${hub.pathname}`;
+			if (
+				!(await this.dependencies.verifyHubConnection(endpoint, hub.authToken))
+			) {
+				throw new Error(
+					`could not connect to ${endpoint}${hubUrls.length > 1 ? ` (also configured: ${hubUrls.slice(1).join(", ")})` : ""}`,
+				);
+			}
 
-			await this.dependencies.waitForTunnel(
-				localPort,
-				tunnel,
-				this.tunnelTimeoutMs,
-			);
+			await this.rememberSharedHubCredential(id, {
+				endpoint,
+				authToken: hub.authToken,
+				home: inspection.home,
+				platform: inspection.platform,
+				arch: inspection.arch,
+			});
 
 			const connectedAt = this.dependencies.now().toISOString();
 			const connection: RemoteEnvironmentConnection = {
 				profile: { ...profile },
 				profileId: id,
 				state: "connected",
-				endpoint: `ws://127.0.0.1:${localPort}${hub.pathname}`,
+				endpoint,
 				authToken: hub.authToken,
 				workspaceRoot: inspection.home,
 				homeDir: inspection.home,
 				platform: inspection.platform,
 				arch: inspection.arch,
-				remoteHubUrl: `ws://127.0.0.1:${hub.port}${hub.pathname}`,
-				localPort,
+				remoteHubUrl,
+				localPort: hubUrlPort(endpoint),
 				connectedAt,
 			};
-			const managed = {
+			const managed: ManagedConnection = {
 				connection,
-				tunnel,
-				cleanup: { profile, helper: remoteHelper, discoveryPath },
+				ownsRemoteHub: false,
 			};
 			this.connections.set(id, managed);
 			this.activeProfileId = id;
 			this.setStatus(id, "connected", "Connected", inspection);
-			tunnel.once("exit", () =>
-				this.handleTunnelEnd(id, managed, "SSH tunnel exited"),
-			);
-			tunnel.once("error", (error) =>
-				this.handleTunnelEnd(id, managed, error.message),
-			);
 			if (previousManaged && previousManaged !== managed) {
 				const sameHub =
 					previousManaged.connection.authToken === connection.authToken &&
-					previousManaged.connection.remoteHubUrl === connection.remoteHubUrl;
+					previousManaged.connection.endpoint === connection.endpoint;
 				if (!sameHub) {
 					await this.stopManagedHub(previousManaged);
 				}
-				previousManaged.tunnel.kill("SIGTERM");
 			}
-			bootstrap = undefined;
-			pendingTunnel = undefined;
 			return { ...connection, profile: { ...connection.profile } };
 		} catch (error) {
-			pendingTunnel?.kill("SIGTERM");
-			let cleanupError: unknown;
-			if (bootstrap) {
-				try {
-					// An independent SSH command works even when forwarding never opened.
-					await this.execRemote(
-						profile,
-						remoteHubStopCommand(bootstrap.helper, bootstrap.discoveryPath),
-					);
-				} catch (failure) {
-					cleanupError = failure;
-					await this.persistPendingCleanup({ profile, ...bootstrap });
-				}
-			}
-			if (cleanupError) {
-				const failure = new Error(
-					`${errorMessage(error)}; remote Hub cleanup failed: ${errorMessage(cleanupError)}`,
-					{ cause: error },
-				);
-				this.setStatus(id, "error", failure.message);
-				throw failure;
-			}
 			this.setStatus(id, "error", errorMessage(error));
 			throw error;
 		}
@@ -460,8 +575,25 @@ export class RemoteEnvironmentService {
 		if (this.activeProfileId === targetId) {
 			this.activeProfileId = undefined;
 		}
-		await this.stopManagedHub(managed);
-		managed.tunnel.kill("SIGTERM");
+		// Stand the connection down gracefully first. A Hub that vanished mid
+		// session is reported as lost; otherwise this is a normal disconnect.
+		const reachable = await this.stopManagedHub(managed);
+		if (!reachable) {
+			// Nothing could stop the Hub directly, so the owned remote Hub is
+			// recorded for the SSH cleanup retry instead of being forgotten.
+			if (managed.ownsRemoteHub && managed.cleanup) {
+				await this.persistPendingCleanup(managed.cleanup).catch(() => undefined);
+			}
+			// The Hub is gone: report the loss so the UI stops showing a live
+			// session instead of a clean disconnect it never asked for.
+			const status = this.setStatus(
+				targetId,
+				"error",
+				`Lost connection to the Hub at ${managed.connection.endpoint}`,
+			);
+			this.onConnectionLost?.(status);
+			return true;
+		}
 		this.setStatus(targetId, "disconnected", "Disconnected");
 		return true;
 	}
@@ -481,9 +613,9 @@ export class RemoteEnvironmentService {
 	}
 
 	/**
-	 * Marks an already-established tunnel as active without doing any SSH work.
-	 * A client uses this to roll back a host switch when the
-	 * new Hub runtime cannot be initialized.
+	 * Marks an already-established direct Hub connection as active without
+	 * doing any SSH work. A client uses this to roll back a host switch when
+	 * the new Hub runtime cannot be initialized.
 	 */
 	public activateConnection(id: string): boolean {
 		if (!this.connections.has(id)) {
@@ -491,6 +623,14 @@ export class RemoteEnvironmentService {
 		}
 		this.activeProfileId = id;
 		return true;
+	}
+
+	/** Last verified shared-Hub auth for a hubUrls profile (memory or disk). */
+	public async peekSharedHubCredential(
+		id: string,
+	): Promise<SharedHubCredential | undefined> {
+		await this.hydrateSharedHubCredentials();
+		return this.sharedHubCredentialCache.get(id);
 	}
 
 	public getStatuses(): RemoteEnvironmentStatus[] {
@@ -520,58 +660,125 @@ export class RemoteEnvironmentService {
 
 	public dispose(): Promise<void> {
 		return this.withMutation(async () => {
+			// Resolve each connection's teardown when it is reached, not up front:
+			// withMutation serializes operations, so a connection queued by an earlier
+			// call may already be gone by the time this loop runs.
 			for (const id of [...this.connections.keys()]) {
 				await this.disconnectProfile(id);
 			}
+			// Every connection is gone, so nothing may stay "active".
+			this.activeProfileId = undefined;
 			await this.retryPendingCleanup();
 		});
 	}
 
+	/**
+	 * Resolve a helper already present on the remote host. AutoCline never
+	 * uploads the ~180MB CLI binary over SSH: place it once under
+	 * `~/.cline/remote/` (shared with stock Cline) or point
+	 * `CLINE_REMOTE_HELPER_BINARY` at an executable path on the remote.
+	 */
 	private async ensureHelper(
 		profile: RemoteEnvironmentProfile,
 		inspection: RemoteInspection,
 	): Promise<string> {
-		const localHelper = await this.dependencies.resolveHelperBinary(inspection);
-		if (!localHelper || !(await this.dependencies.fileReadable(localHelper))) {
-			throw new Error(
-				`Remote target ${inspection.platform}/${inspection.arch} is unsupported in SSH: ` +
-					"no compatible Cline CLI binary is available. Build the Cline CLI for that target and set " +
-					"CLINE_REMOTE_HELPER_BINARY; network installers are intentionally not used.",
-			);
-		}
-
-		const hash = await this.dependencies.hashFile(localHelper);
 		const remoteDirectory = joinRemote(
 			inspection.home,
 			REMOTE_HELPER_DIRECTORY,
 		);
-		const remoteHelper = joinRemote(
-			remoteDirectory,
-			`cline-${inspection.platform}-${inspection.arch}-${hash.slice(0, 16)}`,
-		);
-		await this.installHelper(
-			profile,
-			localHelper,
-			remoteDirectory,
-			remoteHelper,
-		);
-		return remoteHelper;
-	}
+		const prefix = `cline-${inspection.platform}-${inspection.arch}-`;
+		let expectedHelper: string | undefined;
 
-	private async installHelper(
-		profile: RemoteEnvironmentProfile,
-		localHelper: string,
-		remoteDirectory: string,
-		remoteHelper: string,
-	): Promise<void> {
-		const existing = await this.execRemoteAllowFailure(profile, {
-			command: "test",
-			args: ["-x", remoteHelper],
-		});
-		if (existing.exitCode === 0) {
-			return;
+		const localHelper = await this.dependencies.resolveHelperBinary(inspection);
+		if (localHelper && (await this.dependencies.fileReadable(localHelper))) {
+			const hash = await this.dependencies.hashFile(localHelper);
+			expectedHelper = joinRemote(
+				remoteDirectory,
+				`${prefix}${hash.slice(0, 16)}`,
+			);
+			const existing = await this.execRemoteAllowFailure(profile, {
+				command: "test",
+				args: ["-x", expectedHelper],
+			});
+			if (existing.exitCode === 0) {
+				return expectedHelper;
+			}
 		}
 
+		const reused = await this.findReusableRemoteHelper(
+			profile,
+			remoteDirectory,
+			prefix,
+		);
+		if (reused) {
+			if (expectedHelper && reused !== expectedHelper) {
+				await this.linkRemoteHelper(
+					profile,
+					remoteDirectory,
+					reused,
+					expectedHelper,
+				);
+				return expectedHelper;
+			}
+			return reused;
+		}
+
+		const remoteOverride = this.remoteHelperOverridePath?.trim();
+		if (remoteOverride) {
+			const overrideOk = await this.execRemoteAllowFailure(profile, {
+				command: "test",
+				args: ["-x", remoteOverride],
+			});
+			if (overrideOk.exitCode === 0) {
+				return remoteOverride;
+			}
+		}
+
+		throw new Error(
+			`No remote helper found for ${inspection.platform}/${inspection.arch} under ${remoteDirectory}. ` +
+				"AutoCline never uploads the helper over SSH. Install the Cline CLI helper once on the remote " +
+				`(or reuse the stock Cline helper already in ~/.cline/remote/), then reconnect. ` +
+				"Optionally set CLINE_REMOTE_HELPER_BINARY to an executable path on the remote host.",
+		);
+	}
+
+	/** Newest executable `cline-{platform}-{arch}-*` under the remote helper directory. */
+	private async findReusableRemoteHelper(
+		profile: RemoteEnvironmentProfile,
+		remoteDirectory: string,
+		prefix: string,
+	): Promise<string | undefined> {
+		// Use a brace group after the pipe so `exit` sets the pipeline status.
+		// A bare `ls | while ...; done; exit 1` always exits 1 because `exit`
+		// inside `while` only ends the pipe subshell, then the trailing `exit 1`
+		// runs — which made every existing helper look missing.
+		const script =
+			`dir=${shellQuote(remoteDirectory)}; pref=${shellQuote(prefix)}; ` +
+			'ls -1t "$dir"/"$pref"* 2>/dev/null | { ' +
+			'while IFS= read -r f; do ' +
+			'test -x "$f" || continue; test -d "$f" && continue; ' +
+			`printf '%s\n' "$f"; exit 0; done; exit 1; }`;
+		const listed = await this.execRemoteAllowFailure(profile, {
+			command: "sh",
+			args: ["-c", script],
+		});
+		if (listed.exitCode !== 0) {
+			return undefined;
+		}
+		const candidate = listed.stdout
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.find((line) => line.length > 0);
+		return candidate;
+	}
+
+	/** Point the content-addressed name at an already-installed helper (no upload). */
+	private async linkRemoteHelper(
+		profile: RemoteEnvironmentProfile,
+		remoteDirectory: string,
+		sourceHelper: string,
+		targetHelper: string,
+	): Promise<void> {
 		await this.execRemote(profile, {
 			command: "mkdir",
 			args: ["-p", remoteDirectory],
@@ -580,36 +787,28 @@ export class RemoteEnvironmentService {
 			command: "chmod",
 			args: ["700", remoteDirectory],
 		});
-		const temporaryPath = `${remoteHelper}.upload-${this.dependencies.randomId()}`;
-		const uploadCommand = `umask 077; cat > ${shellQuote(temporaryPath)}`;
-		const upload = await this.dependencies.runProcess(
-			this.sshPath,
-			[...this.buildCommandArgs(profile), uploadCommand],
-			{ timeoutMs: this.uploadTimeoutMs, inputFile: localHelper },
-		);
-		if (upload.exitCode !== 0) {
-			throw processFailure("upload remote helper", upload);
-		}
-		try {
-			await this.execRemote(profile, {
-				command: "chmod",
-				args: ["700", temporaryPath],
-			});
-			await this.execRemote(profile, {
-				command: "mv",
-				args: ["-f", temporaryPath, remoteHelper],
-			});
-		} catch (error) {
-			await this.execRemoteAllowFailure(profile, {
-				command: "rm",
-				args: ["-f", temporaryPath],
-			});
-			throw error;
-		}
+		const linkTarget =
+			sourceHelper.startsWith(`${remoteDirectory}/`)
+				? sourceHelper.slice(remoteDirectory.length + 1)
+				: sourceHelper;
+		await this.execRemote(profile, {
+			command: "ln",
+			args: ["-sfn", linkTarget, targetHelper],
+		});
 	}
 
-	private async stopManagedHub(managed: ManagedConnection): Promise<void> {
+	/**
+	 * Asks the Hub to stop, reporting whether it was reachable: `false` means
+	 * the desktop could not talk to it, which is how a lost Hub is noticed
+	 * without a tunnel process to watch.
+	 */
+	private async stopManagedHub(managed: ManagedConnection): Promise<boolean> {
+		// Shared Hubs named in hubUrls outlive the desktop session; only detach.
+		if (!managed.ownsRemoteHub) {
+			return true;
+		}
 		let timeout: ReturnType<typeof setTimeout> | undefined;
+		let reachable = true;
 		try {
 			await Promise.race([
 				this.dependencies
@@ -617,13 +816,115 @@ export class RemoteEnvironmentService {
 						managed.connection.endpoint,
 						managed.connection.authToken,
 					)
-					.catch(() => false),
+					.catch(() => {
+						reachable = false;
+						return false;
+					}),
 				new Promise<boolean>((resolve) => {
 					timeout = setTimeout(() => resolve(false), this.hubShutdownTimeoutMs);
 				}),
 			]);
 		} finally {
 			if (timeout) clearTimeout(timeout);
+		}
+		return reachable;
+	}
+
+	/**
+	 * Reads the auth token of the durable Hub already listening at `endpoint`
+	 * from the remote host's discovery records. Does not start or stop a Hub.
+	 */
+	private sharedHubCredentialsPath(): string {
+		return `${this.profilesPath}.shared-hub-credentials.json`;
+	}
+
+	private async hydrateSharedHubCredentials(): Promise<void> {
+		if (this.sharedHubCredentialHydrated) {
+			return;
+		}
+		this.sharedHubCredentialHydrated = true;
+		try {
+			const raw = await readFile(this.sharedHubCredentialsPath(), "utf8");
+			const parsed: unknown = JSON.parse(raw);
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+				return;
+			}
+			for (const [id, value] of Object.entries(
+				parsed as Record<string, unknown>,
+			)) {
+				if (!value || typeof value !== "object" || Array.isArray(value)) {
+					continue;
+				}
+				const record = value as Record<string, unknown>;
+				const endpoint =
+					typeof record.endpoint === "string" ? record.endpoint.trim() : "";
+				const authToken =
+					typeof record.authToken === "string" ? record.authToken : "";
+				const home = typeof record.home === "string" ? record.home : "";
+				const platform = normalizePlatform(
+					typeof record.platform === "string" ? record.platform : "",
+				);
+				const arch = normalizeArch(
+					typeof record.arch === "string" ? record.arch : "",
+				);
+				if (!endpoint || !authToken || !home || !platform || !arch) {
+					continue;
+				}
+				this.sharedHubCredentialCache.set(id, {
+					endpoint,
+					authToken,
+					home,
+					platform,
+					arch,
+				});
+			}
+		} catch (error) {
+			if (isNodeError(error) && error.code === "ENOENT") {
+				return;
+			}
+			// Corrupt cache must not block connect; fall through to SSH discovery.
+		}
+	}
+
+	private async rememberSharedHubCredential(
+		id: string,
+		credential: SharedHubCredential,
+	): Promise<void> {
+		this.sharedHubCredentialCache.set(id, credential);
+		const payload: Record<string, SharedHubCredential> = Object.fromEntries(
+			this.sharedHubCredentialCache,
+		);
+		const path = this.sharedHubCredentialsPath();
+		const directory = dirname(path);
+		await mkdir(directory, { recursive: true, mode: 0o700 });
+		const temporary = `${path}.${this.dependencies.randomId()}.tmp`;
+		try {
+			await writeFile(temporary, `${JSON.stringify(payload, null, 2)}\n`, {
+				mode: 0o600,
+			});
+			await rename(temporary, path);
+		} finally {
+			await rm(temporary, { force: true });
+		}
+	}
+
+	private async resolveSharedRemoteHub(
+		profile: RemoteEnvironmentProfile,
+		home: string,
+		endpoint: string,
+	): Promise<{ port: number; pathname: string; authToken: string }> {
+		const result = await this.execRemote(
+			profile,
+			remoteHubAuthLookupCommand(home, endpoint),
+		);
+		try {
+			return parseRemoteHubResult(result.stdout);
+		} catch (error) {
+			throw new Error(
+				`Could not find a running Hub discovery record for ${endpoint} on the remote host. ` +
+					"Start the shared Hub there (for example `cline hub ensure --port 25463`) before connecting.",
+				{ cause: error },
+			);
 		}
 	}
 
@@ -731,27 +1032,6 @@ export class RemoteEnvironmentService {
 		return args;
 	}
 
-	private buildTunnelArgs(
-		profile: RemoteEnvironmentProfile,
-		localPort: number,
-		remotePort: number,
-	): string[] {
-		// ClearAllForwardings would also drop our -L, so the alias forwardings
-		// stay. Without ExitOnForwardFailure a collision on one of them is only a
-		// warning; waitForTunnel still verifies our own forward.
-		return [
-			...this.buildSshArgs(profile),
-			"-N",
-			"-o",
-			"ServerAliveInterval=15",
-			"-o",
-			"ServerAliveCountMax=3",
-			"-L",
-			`127.0.0.1:${localPort}:127.0.0.1:${remotePort}`,
-			this.destination(profile),
-		];
-	}
-
 	private destination(profile: RemoteEnvironmentProfile): string {
 		return profile.user ? `${profile.user}@${profile.host}` : profile.host;
 	}
@@ -789,33 +1069,6 @@ export class RemoteEnvironmentService {
 		const snapshot = { ...status };
 		this.onStatusChange?.(snapshot);
 		return snapshot;
-	}
-
-	private handleTunnelEnd(
-		id: string,
-		managed: ManagedConnection,
-		message: string,
-	): void {
-		if (this.connections.get(id) !== managed) {
-			return;
-		}
-		this.connections.delete(id);
-		if (this.activeProfileId === id) {
-			this.activeProfileId = undefined;
-		}
-		// Persist before retrying: network loss can outlive this client process.
-		void this.withMutation(async () => {
-			await this.persistPendingCleanup(managed.cleanup);
-			await this.retryPendingCleanup(id);
-		}).catch((error) =>
-			this.setStatus(
-				id,
-				"error",
-				`${message}; remote Hub cleanup pending: ${errorMessage(error)}`,
-			),
-		);
-		const status = this.setStatus(id, "error", message);
-		this.onConnectionLost?.(status);
 	}
 
 	private async persistPendingCleanup(
@@ -955,10 +1208,8 @@ function createDefaultDependencies(
 ): RemoteEnvironmentDependencies {
 	return {
 		runProcess: runRemoteProcess,
-		spawnTunnel: (executable, args) =>
-			spawn(executable, args, { stdio: "ignore" }),
-		waitForTunnel,
-		reservePort,
+		verifyHubConnection: (url, authToken) =>
+			verifyHubConnection(url, { authToken }),
 		hashFile,
 		resolveHelperBinary: async (target) => {
 			if (configuredHelper) {
@@ -1010,46 +1261,44 @@ export function remoteHelperBinaryFilename(target: RemoteHelperTarget): string {
 }
 
 /**
- * Remote Hubs are CLI-managed: the staged Cline CLI starts (or reuses) a
- * loopback Hub tracked by a discovery record that this client owns, so the
- * user's own CLI Hub on that host is never read or stopped. The discovery
- * path comes last so a stop command can be matched to the ensure it undoes.
+ * SSH one-shot that prints discovery JSON for the Hub already listening at
+ * `endpoint` (matched by exact URL in `urls`/`url`, else by port).
  */
-function remoteHubEnsureCommand(
-	cli: string,
-	cwd: string,
-	discoveryPath: string,
+function remoteHubAuthLookupCommand(
+	home: string,
+	endpoint: string,
 ): RemoteCommandInput {
-	const launcher = getClineClientIdentity();
+	const script = [
+		"import json,glob,sys",
+		"endpoint=sys.argv[1]",
+		"home=sys.argv[2]",
+		"from urllib.parse import urlparse",
+		"u=urlparse(endpoint)",
+		"port=int(u.port or (443 if u.scheme in ('wss','https') else 80))",
+		"paths=[]",
+		"for pattern in (home+'/.cline/data/locks/hub/owners/*.json', home+'/.cline/data/remote/*.json'):",
+		" paths.extend(sorted(glob.glob(pattern)))",
+		"matched=None",
+		"for path in paths:",
+		" if path.endswith('.lock') or 'journal' in path or path.endswith('.instance.lock'):",
+		"  continue",
+		" try:",
+		"  data=json.load(open(path))",
+		" except Exception:",
+		"  continue",
+		" if not isinstance(data,dict) or not data.get('authToken'):",
+		"  continue",
+		" urls=list(data.get('urls') or [])",
+		" if data.get('url'): urls.append(data['url'])",
+		" if endpoint in urls or data.get('port')==port:",
+		"  matched=data; break",
+		"if not matched:",
+		" sys.stderr.write('no hub discovery for '+endpoint+'\\n'); sys.exit(1)",
+		"print(json.dumps({'url': matched.get('url') or ('ws://127.0.0.1:%d/hub'%port), 'port': matched.get('port') or port, 'pathname': '/hub', 'authToken': matched['authToken']}))",
+	].join("\n")
 	return {
-		command: "env",
-		args: [
-			"CLINE_NO_AUTO_UPDATE=1",
-			// The remote daemon's telemetry records who started it; the staged
-			// CLI would otherwise report itself.
-			`${CLINE_HUB_LAUNCHER_CLIENT_ENV}=${launcher?.name?.trim() || "cline"}`,
-			...(launcher?.version?.trim()
-				? [`${CLINE_HUB_LAUNCHER_VERSION_ENV}=${launcher.version.trim()}`]
-				: []),
-			`${CLINE_HUB_LAUNCHER_TRANSPORT_ENV}=ssh`,
-			cli,
-			"hub",
-			"ensure",
-			"--json",
-			"--allow-port-fallback",
-			"--no-connectors",
-			"--login-shell-path",
-			"--cwd",
-			cwd,
-			"--host",
-			"127.0.0.1",
-			"--port",
-			"0",
-			"--pathname",
-			"/hub",
-			"--discovery-path",
-			discoveryPath,
-		],
+		command: "python3",
+		args: ["-c", script, endpoint, home],
 	};
 }
 
@@ -1199,71 +1448,6 @@ export async function runRemoteProcess(
 	});
 }
 
-async function reservePort(): Promise<number> {
-	return new Promise((resolve, reject) => {
-		const server = createServer();
-		server.unref();
-		server.once("error", reject);
-		server.listen(0, "127.0.0.1", () => {
-			const address = server.address();
-			if (!address || typeof address === "string") {
-				server.close();
-				reject(new Error("Failed to reserve a local port for the SSH tunnel"));
-				return;
-			}
-			server.close((error) => (error ? reject(error) : resolve(address.port)));
-		});
-	});
-}
-
-async function waitForTunnel(
-	port: number,
-	tunnel: RemoteTunnelProcess,
-	timeoutMs: number,
-): Promise<void> {
-	let tunnelFailure: Error | undefined;
-	tunnel.once("error", (error) => {
-		tunnelFailure = new Error(`Failed to start SSH tunnel: ${error.message}`, {
-			cause: error,
-		});
-	});
-	tunnel.once("exit", (code, signal) => {
-		tunnelFailure = new Error(
-			`SSH tunnel exited before it became ready (${signal ? `signal ${signal}` : `exit ${code ?? "unknown"}`})`,
-		);
-	});
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (tunnelFailure) {
-			throw tunnelFailure;
-		}
-		if (tunnel.exitCode !== null) {
-			throw new Error(
-				`SSH tunnel exited before it became ready (exit ${tunnel.exitCode})`,
-			);
-		}
-		if (await canConnect(port)) {
-			return;
-		}
-		await delay(50);
-	}
-	throw new Error(`SSH tunnel did not become ready within ${timeoutMs}ms`);
-}
-
-async function canConnect(port: number): Promise<boolean> {
-	return new Promise((resolve) => {
-		const socket = createConnection({ host: "127.0.0.1", port });
-		const finish = (result: boolean): void => {
-			socket.destroy();
-			resolve(result);
-		};
-		socket.setTimeout(250);
-		socket.once("connect", () => finish(true));
-		socket.once("error", () => finish(false));
-		socket.once("timeout", () => finish(false));
-	});
-}
-
 async function hashFile(path: string): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const hash = createHash("sha256");
@@ -1307,6 +1491,8 @@ function normalizeInput(input: RemoteEnvironmentInput): Omit<
 	if (input.id && /[\0\r\n]/.test(input.id)) {
 		throw new Error("Remote environment id is invalid");
 	}
+	const hubUrls = normalizeHubUrlList(input.hubUrls);
+	const hubUrl = normalizeHubUrl(input.hubUrl);
 	return {
 		id: input.id,
 		name,
@@ -1314,6 +1500,8 @@ function normalizeInput(input: RemoteEnvironmentInput): Omit<
 		...(user ? { user } : {}),
 		...(input.port ? { port: input.port } : {}),
 		...(identityFile ? { identityFile } : {}),
+		...(hubUrls.length > 0 ? { hubUrls } : {}),
+		...(hubUrl ? { hubUrl } : {}),
 	};
 }
 
@@ -1555,8 +1743,4 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
-}
-
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -63,12 +63,18 @@ async function collectExtensionTools(
 
 describe("DefaultRuntimeBuilder", () => {
 	const previousHome = process.env.HOME;
+	const previousClineDir = process.env.CLINE_DIR;
 	const previousGlobalSettingsPath = process.env.CLINE_GLOBAL_SETTINGS_PATH;
 	const tempDirs: string[] = [];
 
 	afterEach(() => {
 		process.env.HOME = previousHome;
 		setHomeDir(previousHome ?? "~");
+		if (previousClineDir === undefined) {
+			delete process.env.CLINE_DIR;
+		} else {
+			process.env.CLINE_DIR = previousClineDir;
+		}
 		process.env.CLINE_GLOBAL_SETTINGS_PATH = previousGlobalSettingsPath;
 		for (const dir of tempDirs.splice(0)) {
 			rmSync(dir, { recursive: true, force: true });
@@ -173,6 +179,8 @@ describe("DefaultRuntimeBuilder", () => {
 		const tempHome = mkdtempSync(join(tmpdir(), "cline-agent-home-"));
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "cline-agent-workspace-"));
 		tempDirs.push(tempHome, workspaceRoot);
+		const previousClineDir = process.env.CLINE_DIR;
+		process.env.CLINE_DIR = join(tempHome, ".cline");
 		setHomeDir(tempHome);
 
 		const globalAgentsDir = join(tempHome, ".cline", "agents");

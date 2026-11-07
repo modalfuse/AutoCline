@@ -1,4 +1,3 @@
-import { isClineProvider } from "@cline/shared";
 import { inferProviderOptionsTarget } from "./provider-options-types";
 
 export type ProviderOptionsPatch = Record<string, Record<string, unknown>>;
@@ -44,11 +43,7 @@ export function toProviderOptionsBucket(providerId: string): string {
  *
  * The bucket name must match the AI SDK provider `name`, because the
  * openai-compatible model only applies request-body passthrough from
- * `providerOptions[<name>]` (and its camelCase alias). For almost every
- * provider the name is the gateway provider id, but both Cline gateway ids
- * (`cline` and `cline-pass`) are served by the shared "cline" AI SDK provider
- * (see `createClineProviderModule`) and hit the same Cline API, so their
- * options key to the shared `cline` bucket.
+ * `providerOptions[<name>]` (and its camelCase alias).
  */
 export function buildProviderAndAliasPatch(options: {
 	providerId: string;
@@ -56,12 +51,8 @@ export function buildProviderAndAliasPatch(options: {
 	bucketOptions: Record<string, unknown>;
 }): ProviderOptionsPatch {
 	const { bucketOptions } = options;
-	const providerBucket = isClineProvider(options.providerId)
-		? "cline"
-		: toProviderOptionsBucket(options.providerId);
-	const aliasBucket = isClineProvider(options.providerId)
-		? "cline"
-		: options.providerOptionsKey;
+	const providerBucket = toProviderOptionsBucket(options.providerId);
+	const aliasBucket = options.providerOptionsKey;
 	const needsAlias =
 		aliasBucket !== providerBucket && aliasBucket !== "anthropic";
 	return {

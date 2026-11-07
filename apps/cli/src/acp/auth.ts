@@ -10,8 +10,6 @@ import { writeDiagnostic } from "../utils/output";
  * `setSessionConfigOption`)
  */
 export const ACP_AUTH_METHODS = [
-	{ id: "cline", name: "Sign in with Cline" },
-	{ id: "cline-pass", name: "Sign in with ClinePass" },
 	{ id: "openai-codex", name: "Sign in with ChatGPT Subscription" },
 ] as const;
 

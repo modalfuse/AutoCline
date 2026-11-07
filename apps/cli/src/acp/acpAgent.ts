@@ -36,7 +36,6 @@ import { getPersistedProviderApiKey } from "../commands/auth";
 import { resolveSystemPrompt } from "../runtime/prompt";
 import { subscribeToAgentEvents } from "../runtime/session-events";
 import { createCliCore } from "../session/session";
-import { isClineOrgIndividualInferenceSubscriptionErrorMessage } from "../utils/cline-pass-errors";
 import { getCliBuildInfo } from "../utils/common";
 import { randomSessionId, resolveWorkspaceRoot } from "../utils/helpers";
 import type { ResolvedCliReasoning } from "../utils/reasoning";
@@ -53,11 +52,9 @@ import { buildConfigOptions } from "./config-options";
 import {
 	buildOrganizationConfigOption,
 	fetchClineOrganizations,
-	getAcpOrgSubscriptionMessage,
 	ORGANIZATION_CONFIG_ID,
 	PERSONAL_ACCOUNT_VALUE,
 	switchClineOrganization,
-	usesClineAccount,
 } from "./organizations";
 import { requestAcpToolApproval } from "./permissions";
 import { replaySessionHistory } from "./session-load";
@@ -188,15 +185,14 @@ export class AcpAgent implements Agent {
 
 		const defaultMode = "act";
 		const providerId =
-			process.env.CLINE_PROVIDER ?? this.authResult?.providerId ?? "cline";
+			process.env.CLINE_PROVIDER ?? this.authResult?.providerId ?? "";
 
 		const providerModels = await Llms.getModelsForProvider(
 			providerId,
 			CHAT_MODEL_QUERY_OPTIONS,
 		);
 		// Model ids are provider-scoped, so the default must come from the
-		// provider's own catalog: `cline-pass` uses `cline-pass/…` ids that mean
-		// nothing to `cline`, and vice versa.
+		// provider's own catalog.
 		const defaultModelId = await resolveDefaultModelId(
 			providerId,
 			process.env.CLINE_MODEL,
@@ -221,8 +217,7 @@ export class AcpAgent implements Agent {
 			}),
 		);
 
-		const organizationOption =
-			await this.getOrganizationConfigOption(providerId);
+		const organizationOption = await this.getOrganizationConfigOption();
 
 		return {
 			sessionId,
@@ -265,7 +260,7 @@ export class AcpAgent implements Agent {
 				// as a new session, with the model resolved against the
 				// provider's own catalog just like newSession.
 				const providerId =
-					process.env.CLINE_PROVIDER ?? this.authResult?.providerId ?? "cline";
+					process.env.CLINE_PROVIDER ?? this.authResult?.providerId ?? "";
 				const providerModels = await Llms.getModelsForProvider(
 					providerId,
 					CHAT_MODEL_QUERY_OPTIONS,
@@ -486,7 +481,7 @@ export class AcpAgent implements Agent {
 				// Re-resolve the model against the new provider's catalog: keep the
 				// current one when it's offered there too, otherwise fall back to the
 				// provider's declared default rather than whichever model happens to
-				// be listed first (for cline-pass that is an unrelated free model).
+				// be listed first.
 				const providerModels = await Llms.getModelsForProvider(
 					value,
 					CHAT_MODEL_QUERY_OPTIONS,
@@ -562,9 +557,7 @@ export class AcpAgent implements Agent {
 				);
 		}
 
-		const organizationOption = await this.getOrganizationConfigOption(
-			session.currentProviderId,
-		);
+		const organizationOption = await this.getOrganizationConfigOption();
 		const configOptions = await buildAllConfigOptions(
 			session,
 			organizationOption,
@@ -613,12 +606,9 @@ export class AcpAgent implements Agent {
 		return process.env.CLINE_API_KEY ?? this.authResult?.apiKey ?? "";
 	}
 
-	private async getOrganizationConfigOption(
-		providerId: string,
-	): Promise<SessionConfigOption | undefined> {
-		if (!usesClineAccount(providerId)) {
-			return undefined;
-		}
+	private async getOrganizationConfigOption(): Promise<
+		SessionConfigOption | undefined
+	> {
 		const organizations = await fetchClineOrganizations({
 			apiKey: this.accountApiKey,
 			providerSettingsManager: this.providerSettingsManager,
@@ -845,11 +835,6 @@ async function resolveDefaultModelId(
  * the object ACP actually receives.
  */
 function toAcpPromptError(error: Error): RequestError {
-	if (isClineOrgIndividualInferenceSubscriptionErrorMessage(error)) {
-		const message = getAcpOrgSubscriptionMessage();
-		return RequestError.internalError({ message }, message);
-	}
-
 	const message = describeAgentError(error);
 	const isAuthProblem = isLikelyAuthError(error);
 	return isAuthProblem

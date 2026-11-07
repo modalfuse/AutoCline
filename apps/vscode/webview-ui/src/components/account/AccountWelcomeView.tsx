@@ -3,7 +3,6 @@ import { ClineAuthStatus } from "@/components/account/ClineAuthStatus"
 import { useClineSignIn } from "@/context/ClineAuthContext"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import ClineLogoVariable from "../../assets/ClineLogoVariable"
-import { ClinePassWelcomeCallout } from "./ClinePassCard"
 
 // export const AccountWelcomeView = () => (
 // 	<div className="flex flex-col items-center pr-3 gap-2.5">
@@ -20,8 +19,6 @@ export const AccountWelcomeView = () => {
 				Sign up for an account to get access to the latest models, billing dashboard to view usage and credits, and more
 				upcoming features.
 			</p>
-
-			<ClinePassWelcomeCallout />
 
 			<VSCodeButton className="w-full mb-4" disabled={isLoginLoading} onClick={handleSignIn}>
 				Sign up with Cline

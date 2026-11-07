@@ -9,6 +9,8 @@
  * keys living in the repo.
  */
 
+import { RELEASE_BUILD_ENV as AUTOCLINE_RELEASE_BUILD } from "./build-env-hygiene";
+
 /** Inlined only when present so secrets never inline as empty markers. */
 const OPTIONAL_SECRET_ENV_VARS = [
 	"TELEMETRY_SERVICE_API_KEY",
@@ -43,25 +45,38 @@ const OTEL_ENV_VARS = [
 /**
  * `--define` argument pairs for `bun build`, e.g.
  * `["--define", 'process.env.OTEL_TELEMETRY_ENABLED="1"', ...]`.
+ *
+ * `env` must be the sanitized build env (scripts/build-env-hygiene.ts): a
+ * `--define` is the only way Bun turns a `process.env.X` read into a literal,
+ * so the values passed here are exactly what can end up inside the bundle.
  */
 export function telemetryDefineArgs(
 	env: Record<string, string | undefined> = process.env,
+	options: { release?: boolean } = {},
 ): string[] {
+	const release =
+		options.release ?? env[AUTOCLINE_RELEASE_BUILD] === "1";
 	const args: string[] = [];
 	const define = (name: string, value: string) => {
 		args.push("--define", `process.env.${name}=${JSON.stringify(value)}`);
 	};
-	for (const name of [
-		...OPTIONAL_SECRET_ENV_VARS,
-		...OPTIONAL_FEATURE_ENV_VARS,
-	]) {
-		const value = env[name];
-		if (value) {
-			define(name, value);
+	// Only a release build may inline a service key. A local build must never
+	// bake whatever telemetry/error key happens to sit in the developer's shell
+	// into a distributable binary.
+	if (release) {
+		for (const name of [
+			...OPTIONAL_SECRET_ENV_VARS,
+			...OPTIONAL_FEATURE_ENV_VARS,
+		]) {
+			const value = env[name];
+			if (value) {
+				define(name, value);
+			}
 		}
 	}
 	for (const name of OTEL_ENV_VARS) {
-		define(name, env[name] ?? "");
+		define(name, release ? (env[name] ?? "") : "");
 	}
 	return args;
 }
+

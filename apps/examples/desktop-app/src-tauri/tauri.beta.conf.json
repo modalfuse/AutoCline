@@ -1,7 +1,7 @@
 {
 	"$schema": "https://schema.tauri.app/config/2",
-	"productName": "Cline Beta",
-	"identifier": "bot.cline.app.beta",
+	"productName": "AutoCline Beta",
+	"identifier": "bot.autocline.app.beta",
 	"bundle": {
 		"linux": {
 			"deb": {
@@ -18,9 +18,7 @@
 	},
 	"plugins": {
 		"updater": {
-			"endpoints": [
-				"https://github.com/cline/cline/releases/download/desktop-beta/latest.json"
-			]
+			"endpoints": []
 		}
 	}
 }

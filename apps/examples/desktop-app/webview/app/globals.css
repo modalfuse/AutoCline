@@ -186,3 +186,28 @@ html[data-windows-custom-titlebar] [data-slot="toast-viewport"] {
 	--primary-emphasis: oklch(0.77 0.15 36);
 	--ring: oklch(0.7 0.14 36);
 }
+
+
+/* AutoCline welcome brand backdrop */
+[data-welcome-hero] {
+	--welcome-hero-color: oklch(0.62 0.14 250);
+	--welcome-grid-color: oklch(0.55 0.08 250);
+	--welcome-grid-opacity: 0.14;
+	--welcome-bot-fill-opacity: 0%;
+	--welcome-bot-stroke-opacity: 0%;
+	--welcome-inner-opacity: 0%;
+}
+
+[data-welcome-hero]::after {
+	content: "";
+	position: absolute;
+	z-index: 2;
+	top: 50%;
+	left: 50%;
+	width: min(220px, 36vw);
+	height: min(220px, 36vw);
+	transform: translate(-50%, -58%);
+	background: center / contain no-repeat url("/autocline-brand-icon.png");
+	opacity: 0.9;
+	pointer-events: none;
+}

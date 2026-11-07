@@ -45,13 +45,6 @@ export interface SaveProviderSettingsOptions {
 	tokenSource?: ProviderTokenSource;
 }
 
-export interface ResolveLastUsedProviderSettingsOptions {
-	isClinePassEnabled?: boolean;
-}
-
-const CLINE_PROVIDER_ID = "cline";
-const CLINE_PASS_PROVIDER_ID = "cline-pass";
-
 /**
  * A pasted credential can carry invisible control or format characters (BOM,
  * zero-width spaces, bidirectional marks) that make the provider reject it
@@ -301,26 +294,9 @@ export class ProviderSettingsManager {
 		return state;
 	}
 
-	private resolveLastUsedProviderId(
-		state: StoredProviderSettings,
-		options: ResolveLastUsedProviderSettingsOptions,
-	): string | undefined {
-		const providerId = state.lastUsedProvider;
-		if (
-			providerId === CLINE_PASS_PROVIDER_ID &&
-			options.isClinePassEnabled === false
-		) {
-			return CLINE_PROVIDER_ID;
-		}
-
-		return providerId;
-	}
-
-	getLastUsedProviderSettings(
-		options: ResolveLastUsedProviderSettingsOptions = {},
-	): ProviderSettings | undefined {
+	getLastUsedProviderSettings(): ProviderSettings | undefined {
 		const state = this.read();
-		const providerId = this.resolveLastUsedProviderId(state, options);
+		const providerId = state.lastUsedProvider;
 		if (!providerId) {
 			return undefined;
 		}
@@ -339,10 +315,9 @@ export class ProviderSettingsManager {
 	}
 
 	getLastUsedProviderConfig(
-		options: ToProviderConfigOptions &
-			ResolveLastUsedProviderSettingsOptions = {},
+		options: ToProviderConfigOptions = {},
 	): ProviderConfig | undefined {
-		const settings = this.getLastUsedProviderSettings(options);
+		const settings = this.getLastUsedProviderSettings();
 		if (!settings) {
 			return undefined;
 		}

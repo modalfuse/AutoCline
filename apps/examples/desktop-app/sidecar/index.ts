@@ -3,6 +3,8 @@ import {
 	checkManagedHubBuildMismatch,
 	createClineTelemetryServiceConfig,
 	ensureLoginShellPath,
+	clearPrivateModelsCatalogCache,
+	ProviderSettingsManager,
 	readGlobalSettings,
 	setHomeDirIfUnset,
 	setModelToolEnabledGlobally,
@@ -16,7 +18,12 @@ import {
 	setClineClientIdentity,
 } from "@cline/shared";
 import { prewarmWorkspaceMetadata } from "./chat-session";
-import { adoptDesktopCliRuntime, ensureHubWithDesktopCli } from "./cli-runtime";
+import { applyAppDataRoot } from "./app-data-root";
+import {
+	adoptDesktopCliRuntime,
+	applyDesktopHubDefaults,
+	ensureHubWithDesktopCli,
+} from "./cli-runtime";
 import { DESKTOP_CLIENT_CONTEXT } from "./client-context";
 import { configureConnectorCliLaunch } from "./connectors";
 import {
@@ -58,6 +65,14 @@ async function main(desktopCliPath?: string) {
 		throw new Error("sidecar must be run with Bun");
 	}
 
+	// AutoCline owns ~/.autocline, not the official ~/.cline. Select that root
+	// before anything resolves a path: the session manager, provider settings,
+	// hook logs, kanban logs, MCP settings, and the Hub daemon this process
+	// starts all inherit this env. Runs first on purpose — `ensureLoginShellPath`
+	// below must not be able to overwrite a path variable afterwards.
+	const dataRoot = applyAppDataRoot();
+	const warnedAboutForeignRoots = dataRoot.conflictKeys.length > 0;
+
 	// When launched from Finder/the Dock the app inherits launchd's minimal
 	// PATH, so agent-spawned processes can't find shell-profile-installed
 	// tools like `gh`. Kick resolution off first so it overlaps the rest of
@@ -74,7 +89,28 @@ async function main(desktopCliPath?: string) {
 	observability.logger.log("Desktop sidecar starting", {
 		workspaceRoot,
 		pid: process.pid,
+		dataRoot: dataRoot.root,
+		dataDir: dataRoot.dataDir,
+		dataRootAction: dataRoot.action,
+		dataRootMode: dataRoot.mode,
+		dataRootConflictKeys: dataRoot.conflictKeys,
 	});
+	if (warnedAboutForeignRoots) {
+		// Never fall back silently: an explicit env that points outside
+		// ~/.autocline (e.g. CLINE_DIR=~/.cline) means the user or a wrapper
+		// chose a different state root, and this build must not quietly
+		// rewrite it into the official app's data.
+		observability.logger.log(
+			"Explicit Cline root overrides point outside the AutoCline root; leaving them unchanged while isolating every other path",
+			{
+				expectedRoot: dataRoot.root,
+				conflictKeys: dataRoot.conflictKeys,
+				values: Object.fromEntries(
+					dataRoot.conflictKeys.map((key) => [key, process.env[key] ?? null]),
+				),
+			},
+		);
+	}
 
 	// Web search is opt-in elsewhere in Cline, but the desktop app defaults
 	// it to on. Seed the shared setting only when the user has never set it,
@@ -86,6 +122,36 @@ async function main(desktopCliPath?: string) {
 		}
 	} catch (error) {
 		observability.logger.error?.("Failed to seed web search default", {
+			error,
+		});
+	}
+
+	// AutoCline: drop stale LiteLLM private catalogs (Vendor- labels / dual rows)
+	// left over from earlier builds, then seed LiteLLM when unset or still on
+	// hidden Cline Usage-Billing / ClinePass.
+	try {
+		clearPrivateModelsCatalogCache();
+		const manager = new ProviderSettingsManager();
+		const state = manager.read();
+		const last = state.lastUsedProvider?.trim() || "";
+		const shouldSeed =
+			!last || last === "cline" || last === "cline-pass";
+		if (shouldSeed) {
+			const existing = manager.getProviderSettings("litellm");
+			manager.saveProviderSettings({
+				provider: "litellm",
+				baseUrl: existing?.baseUrl?.trim() || "http://100.101.163.69:4000/v1",
+				apiKey: existing?.apiKey?.trim() || "sk-autocline-local",
+				model:
+					existing?.model?.trim() &&
+					!existing.model.trim().startsWith("gpt-") &&
+					existing.model.trim() !== "auto-coding"
+						? existing.model.trim()
+						: "deepseek-chat",
+			});
+		}
+	} catch (error) {
+		observability.logger.error?.("Failed to seed AutoCline LiteLLM default", {
 			error,
 		});
 	}
@@ -276,6 +342,9 @@ async function runEntrypoint(): Promise<void> {
 		return;
 	}
 	const { cliPath } = adoptDesktopCliRuntime();
+	// Before anything resolves the Hub: keep this app on its own loopback port
+	// and discovery record instead of the official Cline app's Hub.
+	applyDesktopHubDefaults();
 	setClineClientIdentity(DESKTOP_CLIENT_CONTEXT);
 
 	disableCurrentDirectoryExecutableSearch();

@@ -6,8 +6,6 @@ import { createHandlerAsync } from "../providers";
 describe("provider fallback HTTP requests", () => {
 	it.each([
 		"openrouter",
-		"cline",
-		"cline-pass",
 	])("sends provider failover for Anthropic models through %s", async (providerId) => {
 		for (const modelId of ["anthropic/claude-sonnet-4.6", "openai/gpt-5.4"]) {
 			const providerFetch = vi.fn<typeof fetch>(

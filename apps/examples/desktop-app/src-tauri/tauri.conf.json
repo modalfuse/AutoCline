@@ -1,8 +1,8 @@
 {
 	"$schema": "https://schema.tauri.app/config/2",
-	"productName": "Cline",
-	"version": "0.0.49",
-	"identifier": "bot.cline.app",
+	"productName": "AutoCline",
+	"version": "1.1.0",
+	"identifier": "bot.autocline.app",
 	"build": {
 		"beforeDevCommand": "bun run build:runtime && bun run dev:web",
 		"devUrl": "http://localhost:3125",
@@ -12,16 +12,14 @@
 	"plugins": {
 		"updater": {
 			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENEMTJDNzk2RUExQUY3RDEKUldUUjl4cnFsc2NTelYxNzlFR1NkWnI0VTM1V0hvQXRyOW0xV2c0bFhkL3dhdkdpNGhNRW1MQXEK",
-			"endpoints": [
-				"https://github.com/cline/cline/releases/download/desktop-latest/latest.json"
-			]
+			"endpoints": []
 		}
 	},
 	"app": {
 		"windows": [
 			{
 				"label": "main",
-				"title": "Cline",
+				"title": "AutoCline",
 				"width": 1500,
 				"height": 980,
 				"resizable": true,
@@ -38,10 +36,12 @@
 		"active": true,
 		"targets": "all",
 		"category": "DeveloperTool",
-		"shortDescription": "Cline AI coding agent",
-		"longDescription": "Cline is an AI coding agent. It reads your code, edits files, runs commands, and works through tasks with you in any project on your machine.",
-		"homepage": "https://cline.bot",
-		"externalBin": ["bin/cline-cli"],
+		"shortDescription": "AutoCline (fork of Cline) AI coding agent",
+		"longDescription": "AutoCline is a fork of Cline, an AI coding agent. It reads your code, edits files, runs commands, and works through tasks with you in any project on your machine. Installs side by side with Cline.app and never replaces it.",
+		"homepage": "https://github.com/modalfuse/AutoCline",
+		"externalBin": [
+			"bin/autocline-cli"
+		],
 		"resources": [
 			"icons/app/*.png",
 			"icons/app/macos/*.png",

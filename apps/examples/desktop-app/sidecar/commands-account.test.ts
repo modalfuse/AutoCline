@@ -93,11 +93,11 @@ beforeEach(() => {
 
 describe("provider settings cloud session lifecycle", () => {
 	it.each([
-		["cline", false, true],
-		["cline-pass", false, true],
-		["openai-codex", false, false],
-		["cline-pass", true, false],
-	] as const)("handles %s login (failed: %s, resets cloud: %s)", async (provider, failed, resets) => {
+		["cline", "removed"],
+		["cline-pass", "removed"],
+		["openai-codex", "login-succeeds"],
+		["openai-codex", "login-fails"],
+	] as const)("handles %s login (%s)", async (provider, outcome) => {
 		const { ctx } = createContext();
 		const dispose = vi.fn().mockResolvedValue(undefined);
 		const cloudManager = { dispose } as unknown as NonNullable<
@@ -106,26 +106,25 @@ describe("provider settings cloud session lifecycle", () => {
 		ctx.cloudSessionManager = cloudManager;
 		const send = vi.fn();
 		ctx.wsClients.add({ send });
-		if (failed)
+		if (outcome === "login-fails")
 			runProviderOAuthLoginMock.mockRejectedValueOnce(
 				new Error("login failed"),
 			);
 		const { handleCommand } = await import("./commands");
 		const login = handleCommand(ctx, "run_provider_oauth_login", { provider });
-		if (failed) await expect(login).rejects.toThrow("login failed");
+		if (outcome === "removed") {
+			// Removed providers are rejected locally: the generic login path must
+			// never invoke the OAuth login helper or touch cloud sessions.
+			await expect(login).rejects.toThrow(
+				`provider "${provider}" does not support OAuth login`,
+			);
+			expect(runProviderOAuthLoginMock).not.toHaveBeenCalled();
+		} else if (outcome === "login-fails")
+			await expect(login).rejects.toThrow("login failed");
 		else await expect(login).resolves.toEqual({ accessToken: "token" });
-		expect(ctx.cloudSessionManager).toBe(resets ? null : cloudManager);
-		expect(dispose).toHaveBeenCalledTimes(resets ? 1 : 0);
-		expect(send.mock.calls.map(([raw]) => JSON.parse(raw).event)).toEqual(
-			resets
-				? [
-						{
-							name: "cloud_sessions_changed",
-							payload: { environmentId: "local" },
-						},
-					]
-				: [],
-		);
+		expect(ctx.cloudSessionManager).toBe(cloudManager);
+		expect(dispose).toHaveBeenCalledTimes(0);
+		expect(send.mock.calls.map(([raw]) => JSON.parse(raw).event)).toEqual([]);
 	});
 
 	it.each([

@@ -65,16 +65,23 @@ describe("getProviderConfigFields", () => {
 		);
 	});
 
-	it("returns oauth auth with no fields for cline", () => {
-		const result = getProviderConfigFields("cline");
-		expect(result.authMethod).toBe("oauth");
-		expect(result.fields).toEqual({});
-	});
-
 	it("returns oauth auth with no fields for openai-codex", () => {
 		const result = getProviderConfigFields("openai-codex");
 		expect(result.authMethod).toBe("oauth");
 		expect(result.fields).toEqual({});
+	});
+
+	it("does not treat the removed local cline OAuth provider as local OAuth", () => {
+		// `cline` account auth is handled by a separate explicit cloud-account
+		// handler, not by a locally registered OAuth handler. The local lookup
+		// must therefore fall through to the API-key fallback shape instead of
+		// reporting an OAuth provider.
+		const result = getProviderConfigFields("cline");
+		expect(result.authMethod).toBe("api-key");
+		expect(result.authMethod).not.toBe("oauth");
+		expect(result.fields.apiKey).toEqual({});
+		expect(result.fields.baseUrl).toBeUndefined();
+		expect(result.fields).toEqual({ apiKey: {} });
 	});
 
 	it("returns local auth with no fields for openai-codex-cli", () => {

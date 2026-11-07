@@ -9,7 +9,6 @@ import {
 } from "@cline/shared";
 import { z } from "zod";
 import { getProviderAuthHandler } from "../../../auth/provider-auth-registry";
-import { fetchClineRecommendedModels } from "../../../services/llms/cline-recommended-models";
 import { ProviderSettingsSchema } from "../../../services/llms/provider-settings";
 import { clearLegacyProviderCredentials } from "../../../services/providers/legacy-provider-credentials";
 import {
@@ -24,9 +23,6 @@ import { ProviderSettingsManager } from "../../../services/storage/provider-sett
 import { errorReply, okReply } from "./context";
 
 const providerId = z.string().trim().min(1);
-const listSchema = z
-	.object({ isClinePassEnabled: z.boolean().optional() })
-	.strict();
 const modelsSchema = z
 	.object({
 		providerId,
@@ -112,9 +108,9 @@ export async function handleProviderCommand(
 		const manager = new ProviderSettingsManager();
 		switch (envelope.command) {
 			case "providers.list": {
-				const options = listSchema.parse(payload);
+				z.object({}).strict().parse(payload);
 				await ensureCustomProvidersLoaded(manager);
-				return okReply(envelope, await listLocalProviders(manager, options));
+				return okReply(envelope, await listLocalProviders(manager));
 			}
 			case "providers.models.list": {
 				const input = modelsSchema.parse(payload);
@@ -127,20 +123,10 @@ export async function handleProviderCommand(
 							includeKnownModels: false,
 						}),
 						{
-							loadLatest:
-								input.providerId === "cline" &&
-								input.includeCloudModels === true,
+							loadLatest: input.includeCloudModels === true,
 						},
 					),
 				);
-			}
-			case "providers.models.recommended": {
-				z.object({}).strict().parse(payload);
-				return okReply(envelope, {
-					...(await fetchClineRecommendedModels({
-						providerSettingsManager: manager,
-					})),
-				});
 			}
 			case "providers.settings.save": {
 				const input = saveSchema.parse(payload);

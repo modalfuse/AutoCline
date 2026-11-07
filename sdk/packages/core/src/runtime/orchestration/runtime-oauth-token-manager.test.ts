@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createClineAccountAuthHandler } from "../../auth/cline-account";
+import type { ProviderAuthHandler } from "../../auth/provider-auth-registry";
 import { ProviderSettingsManager } from "../../services/storage/provider-settings-manager";
 import {
 	OAuthReauthRequiredError,
@@ -12,10 +14,12 @@ const {
 	getValidOpenAICodexCredentials,
 	getValidClineCredentials,
 	getValidOcaCredentials,
+	loginClineOAuth,
 } = vi.hoisted(() => ({
 	getValidOpenAICodexCredentials: vi.fn(),
 	getValidClineCredentials: vi.fn(),
 	getValidOcaCredentials: vi.fn(),
+	loginClineOAuth: vi.fn(),
 }));
 
 vi.mock("../../auth/codex", () => ({
@@ -24,11 +28,27 @@ vi.mock("../../auth/codex", () => ({
 
 vi.mock("../../auth/cline", () => ({
 	getValidClineCredentials,
+	loginClineOAuth,
 }));
 
 vi.mock("../../auth/oca", () => ({
 	getValidOcaCredentials,
 }));
+
+/**
+ * Cloud account credentials are resolved by cloud/sidecar callers through an
+ * explicitly injected handler; the local registry intentionally has no
+ * `cline`/`cline-pass` entry.
+ */
+function useClineAccountHandler() {
+	const handler = createClineAccountAuthHandler();
+	return {
+		resolveAuthHandler: (providerId: string): ProviderAuthHandler | undefined =>
+			providerId.trim().toLowerCase() === handler.providerId
+				? handler
+				: undefined,
+	};
+}
 
 describe("RuntimeOAuthTokenManager", () => {
 	let testDir: string;
@@ -87,7 +107,7 @@ describe("RuntimeOAuthTokenManager", () => {
 		);
 	});
 
-	it("resolves ClinePass OAuth using Cline storage and WorkOS formatting", async () => {
+	it("resolves the cloud account OAuth handler using Cline storage and WorkOS formatting", async () => {
 		const getProviderSettings = vi.fn().mockReturnValue({
 			provider: "cline",
 			baseUrl: "https://api.cline.test",
@@ -113,11 +133,10 @@ describe("RuntimeOAuthTokenManager", () => {
 				getProviderSettings,
 				saveProviderSettings,
 			} as never,
+			...useClineAccountHandler(),
 		});
 
-		const result = await manager.resolveProviderApiKey({
-			providerId: "cline-pass",
-		});
+		const result = await manager.resolveProviderApiKey({ providerId: "cline" });
 
 		expect(getProviderSettings).toHaveBeenCalledWith("cline");
 		expect(getValidClineCredentials).toHaveBeenCalledWith(
@@ -145,6 +164,34 @@ describe("RuntimeOAuthTokenManager", () => {
 			}),
 			{ setLastUsed: false, tokenSource: "oauth" },
 		);
+	});
+
+	it("returns null for local cline/cline-pass providers without an injected handler", async () => {
+		const getProviderSettings = vi.fn().mockReturnValue({
+			provider: "cline",
+			auth: {
+				accessToken: "workos:access-old",
+				refreshToken: "refresh-old",
+				expiresAt: Date.now() - 1_000,
+			},
+		});
+		const saveProviderSettings = vi.fn();
+		const manager = new RuntimeOAuthTokenManager({
+			providerSettingsManager: {
+				getFilePath: () => join(testDir, "providers.json"),
+				getProviderSettings,
+				saveProviderSettings,
+			} as never,
+		});
+
+		expect(
+			await manager.resolveProviderApiKey({ providerId: "cline" }),
+		).toBeNull();
+		expect(
+			await manager.resolveProviderApiKey({ providerId: "cline-pass" }),
+		).toBeNull();
+		expect(getValidClineCredentials).not.toHaveBeenCalled();
+		expect(saveProviderSettings).not.toHaveBeenCalled();
 	});
 
 	it("throws re-auth required when refresh returns null", async () => {
@@ -234,9 +281,11 @@ describe("RuntimeOAuthTokenManager", () => {
 		);
 		const first = new RuntimeOAuthTokenManager({
 			providerSettingsManager: settings,
+			...useClineAccountHandler(),
 		});
 		const second = new RuntimeOAuthTokenManager({
 			providerSettingsManager: settings,
+			...useClineAccountHandler(),
 		});
 		const a = first.resolveProviderApiKey({
 			providerId: "cline",
@@ -244,7 +293,7 @@ describe("RuntimeOAuthTokenManager", () => {
 		});
 		await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
 		const b = second.resolveProviderApiKey({
-			providerId: "cline-pass",
+			providerId: "cline",
 			forceRefresh: true,
 		});
 		finish();
@@ -283,6 +332,7 @@ describe("RuntimeOAuthTokenManager", () => {
 		});
 		const manager = new RuntimeOAuthTokenManager({
 			providerSettingsManager: settings,
+			...useClineAccountHandler(),
 		});
 		const result = manager.resolveProviderApiKey({ providerId: "cline" });
 		await vi.waitFor(() => expect(finish).toBeTypeOf("function"));

@@ -210,8 +210,6 @@ describe("Anthropic server-side refusal fallbacks", () => {
 
 	it.each([
 		"openrouter",
-		"cline",
-		"cline-pass",
 		"bedrock",
 		"vertex",
 		"minimax",
@@ -228,11 +226,8 @@ describe("Anthropic server-side refusal fallbacks", () => {
 });
 
 describe("Routed Anthropic provider failover", () => {
-	it.each([
-		"openrouter",
-		"cline",
-		"cline-pass",
-	])("enables provider failover in the transport bucket for %s", (providerId) => {
+	it("enables provider failover in the transport bucket", () => {
+		const providerId = "openrouter";
 		for (const model of [
 			{ modelId: "anthropic/claude-fable-5" },
 			{ modelId: "custom-model", family: "claude" },
@@ -242,19 +237,14 @@ describe("Routed Anthropic provider failover", () => {
 				makeRequest(selection),
 				makeContext(selection),
 			);
-			const bucket = providerId === "openrouter" ? "openrouter" : "cline";
-			expect(options[bucket]).toMatchObject({
+			expect(options.openrouter).toMatchObject({
 				provider: { allow_fallbacks: true },
 			});
-			expect(options).not.toHaveProperty("cline-pass");
-			expect(options).not.toHaveProperty("clinePass");
 		}
 	});
 
 	it.each([
 		{ providerId: "openrouter", modelId: "openai/gpt-5" },
-		{ providerId: "cline", modelId: "google/gemini-3-pro" },
-		{ providerId: "cline-pass", modelId: "unknown-model" },
 		{ providerId: "openrouter", modelId: "claude-alias", family: "qwen" },
 		{ providerId: "anthropic", modelId: "claude-fable-5" },
 		{ providerId: "bedrock", modelId: "anthropic/claude-fable-5" },
@@ -753,42 +743,6 @@ describe("composeAiSdkProviderOptions: Anthropic thinking precedence", () => {
 			],
 		},
 		{
-			name: "Cline-routed Sonnet 4.5 -> gateway reasoning, no thinking, no effort",
-			request: {
-				providerId: "cline",
-				modelId: "anthropic/claude-sonnet-4-5",
-				reasoning: { enabled: true, effort: "low" },
-			},
-			context: { family: "claude-sonnet" },
-			expect: [
-				{
-					bucket: "cline",
-					has: { reasoning: { enabled: true, max_tokens: 1024 } },
-					lacks: ["thinking"],
-				},
-			],
-		},
-		{
-			// ClinePass is served by the shared "cline" AI SDK provider (same
-			// Cline API), which only reads the "cline" providerOptions bucket.
-			// Uses an explicit budget because effort-based reasoning is portable
-			// and never reaches provider-option buckets.
-			name: "ClinePass-routed Sonnet 4.5 budget -> gateway reasoning under the shared cline bucket",
-			request: {
-				providerId: "cline-pass",
-				modelId: "anthropic/claude-sonnet-4-5",
-				reasoning: { enabled: true, budgetTokens: 2048 },
-			},
-			context: { family: "claude-sonnet" },
-			expect: [
-				{
-					bucket: "cline",
-					has: { reasoning: { enabled: true, max_tokens: 2048 } },
-					lacks: ["thinking"],
-				},
-			],
-		},
-		{
 			name: "legacy custom Claude with promptCacheStrategy -> Anthropic reasoning",
 			request: {
 				providerId: "custom-provider",
@@ -1229,26 +1183,6 @@ describe("composeAiSdkProviderOptions: family/provider thinking patches", () => 
 				{ bucket: "vercelAiGateway", has: { reasoning: { exclude: true } } },
 			],
 		},
-		{
-			name: "cline GLM thinking-disabled -> routed reasoning only, no thinking leak",
-			request: {
-				providerId: "cline",
-				modelId: "z-ai/glm-4.7",
-				reasoning: { enabled: false },
-			},
-			expect: [
-				{
-					bucket: "cline",
-					has: { reasoning: { exclude: true } },
-					lacks: ["thinking"],
-				},
-				{
-					bucket: "openaiCompatible",
-					has: { reasoning: { exclude: true } },
-					lacks: ["thinking"],
-				},
-			],
-		},
 		// Native Z.AI uses a real thinking shape, not the routed reasoning shape
 		{
 			name: "native zai thinking -> thinking.type=enabled, no routed reasoning",
@@ -1281,76 +1215,6 @@ describe("composeAiSdkProviderOptions: family/provider thinking patches", () => 
 			],
 		},
 		// Kimi K2.6 family: explicit enabled/disabled and unset defaults to enabled
-		{
-			name: "cline Kimi K2.6 family reasoning.enabled=false -> thinking.type=disabled",
-			request: {
-				providerId: "cline",
-				modelId: "moonshotai/kimi-k2.6",
-				reasoning: { enabled: false },
-			},
-			context: { family: "kimi-k2.6" },
-			expect: [
-				{ bucket: "cline", has: { thinking: { type: "disabled" } } },
-				{
-					bucket: "openaiCompatible",
-					has: { thinking: { type: "disabled" } },
-				},
-			],
-		},
-		{
-			name: "cline Kimi K2.6 family reasoning.enabled=true -> thinking.type=enabled",
-			request: {
-				providerId: "cline",
-				modelId: "moonshotai/kimi-k2.6",
-				reasoning: { enabled: true },
-			},
-			context: { family: "kimi-k2.6" },
-			expect: [
-				{ bucket: "cline", has: { thinking: { type: "enabled" } } },
-				{ bucket: "openaiCompatible", has: { thinking: { type: "enabled" } } },
-			],
-		},
-		{
-			name: "cline generic reasoning.enabled=false -> gateway reasoning only, no thinking patch",
-			request: {
-				providerId: "cline",
-				modelId: "gpt-5.4",
-				reasoning: { enabled: false },
-			},
-			expect: [
-				{
-					bucket: "cline",
-					has: { reasoning: { enabled: false } },
-					lacks: ["thinking"],
-				},
-				{
-					bucket: "openaiCompatible",
-					lacks: ["thinking", "reasoning"],
-				},
-			],
-		},
-		{
-			name: "cline non-K2.6 Moonshot Kimi reasoning.enabled=false -> thinking.type=disabled",
-			request: {
-				providerId: "cline",
-				modelId: "moonshotai/kimi-k2.5",
-				reasoning: { enabled: false },
-			},
-			context: { family: "kimi-k2.5" },
-			expect: [
-				{
-					bucket: "cline",
-					has: {
-						reasoning: { enabled: false },
-						thinking: { type: "disabled" },
-					},
-				},
-				{
-					bucket: "openaiCompatible",
-					has: { thinking: { type: "disabled" } },
-				},
-			],
-		},
 		{
 			name: "openrouter Kimi K2.6 family reasoning.enabled=false -> reasoning.effort=none",
 			request: {
@@ -1486,170 +1350,6 @@ describe("composeAiSdkProviderOptions: family/provider thinking patches", () => 
 						"reasoningEffort",
 						"reasoningSummary",
 					],
-				},
-			],
-		},
-		{
-			name: "cline qwen prompt-cache-only route reasoning.enabled=true -> cache control, no gateway reasoning",
-			request: {
-				providerId: "cline",
-				modelId: "qwen/qwen3.6-plus",
-				reasoning: { enabled: true, effort: "high" },
-			},
-			context: {
-				family: "qwen",
-				capabilities: ["text", "prompt-cache"],
-				metadata: {
-					routing: {
-						promptCache: {
-							format: "anthropic-cache-control",
-							routes: [
-								{
-									matcher: "model-family",
-									family: "qwen",
-									requiredCapability: "prompt-cache",
-								},
-							],
-						},
-					},
-				},
-			},
-			expect: [
-				{
-					bucket: "cline",
-					has: { cache_control: { type: "ephemeral" } },
-					lacks: [
-						"reasoning",
-						"thinking",
-						"effort",
-						"reasoningEffort",
-						"reasoningSummary",
-					],
-				},
-			],
-		},
-		{
-			name: "cline unregistered qwen reasoning.enabled=true -> no gateway reasoning",
-			request: {
-				providerId: "cline",
-				modelId: "qwen/qwen3.7-plus",
-				reasoning: { enabled: true, effort: "high" },
-			},
-			context: {
-				metadata: {
-					routing: {
-						promptCache: {
-							format: "anthropic-cache-control",
-							routes: [
-								{
-									matcher: "model-family",
-									family: "qwen",
-									requiredCapability: "prompt-cache",
-								},
-							],
-						},
-					},
-				},
-			},
-			expect: [
-				{
-					bucket: "cline",
-					lacks: [
-						"reasoning",
-						"thinking",
-						"effort",
-						"reasoningEffort",
-						"reasoningSummary",
-					],
-				},
-				{
-					bucket: "openaiCompatible",
-					lacks: ["thinking", "effort", "reasoningEffort", "reasoningSummary"],
-				},
-			],
-		},
-		{
-			name: "cline Kimi K2.6 family reasoning.enabled=false also keeps gateway reasoning shape",
-			request: {
-				providerId: "cline",
-				modelId: "moonshotai/kimi-k2.6",
-				reasoning: { enabled: false },
-			},
-			context: { family: "kimi-k2.6" },
-			expect: [{ bucket: "cline", has: { reasoning: { enabled: false } } }],
-		},
-		{
-			name: "cline Claude Fable omits an unadvertised disabled control",
-			request: {
-				providerId: "cline",
-				modelId: "anthropic/claude-fable-5",
-				reasoning: { enabled: false },
-			},
-			context: {
-				reasoningOptions: effortOptions([
-					"low",
-					"medium",
-					"high",
-					"xhigh",
-					"max",
-				]),
-			},
-			expect: [
-				{
-					bucket: "cline",
-					lacks: ["reasoning", "thinking"],
-				},
-			],
-		},
-		{
-			name: "cline Claude Fable ignores an advertised toggle because reasoning is mandatory",
-			request: {
-				providerId: "cline",
-				modelId: "anthropic/claude-fable-5",
-				reasoning: { enabled: false },
-			},
-			context: {
-				reasoningOptions: [
-					{ type: "toggle" },
-					...effortOptions(["low", "medium", "high", "xhigh", "max"]),
-				],
-			},
-			expect: [
-				{
-					bucket: "cline",
-					lacks: ["reasoning", "thinking"],
-				},
-			],
-		},
-		{
-			name: "cline StepFun 3.7 Flash reasoning.enabled=false omits disabled reasoning",
-			request: {
-				providerId: "cline",
-				modelId: "stepfun/step-3.7-flash",
-				reasoning: { enabled: false },
-			},
-			expect: [
-				{
-					bucket: "cline",
-					lacks: ["reasoning", "thinking"],
-				},
-				{
-					bucket: "openaiCompatible",
-					lacks: ["reasoning", "thinking"],
-				},
-			],
-		},
-		{
-			name: "cline StepFun 3.7 Flash variants reasoning.enabled=false omit disabled reasoning",
-			request: {
-				providerId: "cline",
-				modelId: "stepfun/step-3.7-flash-v2",
-				reasoning: { enabled: false },
-			},
-			expect: [
-				{
-					bucket: "cline",
-					lacks: ["reasoning", "thinking"],
 				},
 			],
 		},
@@ -1859,52 +1559,6 @@ describe("composeAiSdkProviderOptions: family/provider thinking patches", () => 
 			expect: [
 				{
 					bucket: "vercelAiGateway",
-					lacks: ["thinking", "reasoning"],
-				},
-			],
-		},
-		{
-			name: "cline MiniMax M3 reasoning enabled -> gateway reasoning without thinking leak",
-			request: {
-				providerId: "cline",
-				modelId: "minimax/minimax-m3",
-				reasoning: { enabled: true, effort: "high" },
-			},
-			context: {
-				family: "minimax",
-				capabilities: ["reasoning"],
-			},
-			expect: [
-				{
-					bucket: "cline",
-					has: { reasoning: { enabled: true, effort: "high" } },
-					lacks: ["thinking", "effort", "reasoningEffort", "reasoningSummary"],
-				},
-				{
-					bucket: "openaiCompatible",
-					lacks: ["thinking", "reasoning", "effort", "reasoningEffort"],
-				},
-			],
-		},
-		{
-			name: "cline MiniMax M3 reasoning disabled -> gateway reasoning disabled",
-			request: {
-				providerId: "cline",
-				modelId: "minimax/minimax-m3",
-				reasoning: { enabled: false },
-			},
-			context: {
-				family: "minimax",
-				capabilities: ["reasoning"],
-			},
-			expect: [
-				{
-					bucket: "cline",
-					has: { reasoning: { enabled: false } },
-					lacks: ["thinking"],
-				},
-				{
-					bucket: "openaiCompatible",
 					lacks: ["thinking", "reasoning"],
 				},
 			],
@@ -2660,33 +2314,5 @@ describe("composeAiSdkProviderOptions: provider-specific overlays", () => {
 		expect(result.vertex).not.toHaveProperty("reasoningEffort");
 		expect(result.vertex).not.toHaveProperty("reasoningSummary");
 		expect(result.google).toBeUndefined();
-	});
-});
-
-describe("composeAiSdkProviderOptions: ClinePass bucket normalization", () => {
-	it("keys ClinePass options to the shared cline bucket only", () => {
-		const result = composeAiSdkProviderOptions(
-			makeRequest({
-				providerId: "cline-pass",
-				modelId: "anthropic/claude-sonnet-4-5",
-				reasoning: { enabled: true, budgetTokens: 2048 },
-			}),
-			makeContext({
-				providerId: "cline-pass",
-				modelId: "anthropic/claude-sonnet-4-5",
-				family: "claude-sonnet",
-			}),
-		);
-
-		// The shared "cline" AI SDK provider serves both gateway ids and only
-		// reads the "cline" providerOptions bucket, so nothing may be emitted
-		// under the concrete "cline-pass" id or its camelCase alias.
-		expect(result.cline).toEqual(
-			expect.objectContaining({
-				reasoning: { enabled: true, max_tokens: 2048 },
-			}),
-		);
-		expect(result).not.toHaveProperty("cline-pass");
-		expect(result).not.toHaveProperty("clinePass");
 	});
 });

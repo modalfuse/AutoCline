@@ -40,17 +40,6 @@ interface StoredProviderSettingsLike {
 
 const targets: ProviderVcrTarget[] = [
 	{
-		label: "Cline provider",
-		providerId: "cline",
-		modelId: "anthropic/claude-sonnet-4.6",
-		playbackConfig: {
-			providerId: "cline",
-			modelId: "anthropic/claude-sonnet-4.6",
-			apiKey: "workos:test-token",
-		},
-		cassetteName: "cline-anthropic-sonnet.json",
-	},
-	{
 		label: "ChatGPT OAuth provider",
 		providerId: "openai-codex",
 		modelId: "gpt-5.4",

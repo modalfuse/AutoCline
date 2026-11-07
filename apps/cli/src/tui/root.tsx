@@ -15,10 +15,6 @@ import {
 	useDialogState,
 } from "@opentui-ui/dialog/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-	CLINE_PASS_NOTICE_ID,
-	shouldSuppressClineCliMigrationNoticeForActiveProvider,
-} from "../kanban-migration/notice";
 import { MigrationNoticeContent } from "../kanban-migration/notice-dialog";
 import {
 	isSameRepoStatus,
@@ -595,19 +591,10 @@ function App(props: TuiProps) {
 
 	const notice = props.initialNotice;
 	const onInitialNoticeShown = props.onInitialNoticeShown;
-	const currentProviderId = props.config.providerId;
 	useEffect(() => {
 		if (!notice) return;
 		if (initialNoticeShownRef.current) return;
 		if (appView !== "home") return;
-		if (
-			notice.id === CLINE_PASS_NOTICE_ID &&
-			shouldSuppressClineCliMigrationNoticeForActiveProvider(currentProviderId)
-		) {
-			initialNoticeShownRef.current = true;
-			return;
-		}
-
 		initialNoticeShownRef.current = true;
 		const timeout = setTimeout(() => {
 			void dialog
@@ -622,7 +609,7 @@ function App(props: TuiProps) {
 				});
 		}, 0);
 		return () => clearTimeout(timeout);
-	}, [appView, currentProviderId, dialog, notice, onInitialNoticeShown]);
+	}, [appView, dialog, notice, onInitialNoticeShown]);
 
 	const [hubBuildMismatch, setHubBuildMismatch] =
 		useState<ManagedHubBuildMismatchEvent | null>(null);
@@ -1093,7 +1080,6 @@ function App(props: TuiProps) {
 		cloud: cloud.statusBar,
 		textareaRef: promptInput.textareaRef,
 		transcriptScrollRef,
-		loadIndividualSubscriptionPlans: props.loadIndividualSubscriptionPlans,
 		queuedPrompts,
 		selectedQueuedPromptId,
 		editingQueuedPrompt,

@@ -9,7 +9,8 @@ import {
 } from "@cline/shared";
 import { z } from "zod";
 import { ClineAccountService } from "../../account";
-import { getProviderAuthHandler } from "../../auth/provider-auth-registry";
+import { createClineAccountAuthHandler } from "../../auth/cline-account";
+import type { ProviderAuthHandler } from "../../auth/provider-auth-registry";
 import { CloudSessionApi } from "../../cloud/api";
 import { CLOUD_COMPUTER_USE_ENV } from "../../cloud/computer-use-prompt";
 import { CloudSessionController } from "../../cloud/controller";
@@ -219,6 +220,14 @@ export class HubCloudSessionService {
 	private scope?: CloudAccountScope;
 	private closed = false;
 	private readonly snapshots = new Map<string, CloudSessionSnapshot>();
+	/**
+	 * Cloud-account auth handler for this daemon. It is deliberately NOT
+	 * resolved from the local provider auth registry (which no longer contains a
+	 * `cline` entry); the same instance is injected into the OAuth token manager
+	 * and used for the persisted-token fallback so refresh/read/save all go
+	 * through one handler.
+	 */
+	private readonly clineAuthHandler: ProviderAuthHandler;
 	private readonly tokenManager: RuntimeOAuthTokenManager;
 	private readonly settings = new ProviderSettingsManager();
 	private readonly scopeTimer: ReturnType<typeof setInterval>;
@@ -229,9 +238,14 @@ export class HubCloudSessionService {
 	>();
 	activeCommands = 0;
 	constructor(private readonly options: HubCloudSessionServiceOptions) {
+		this.clineAuthHandler = createClineAccountAuthHandler();
 		this.tokenManager = new RuntimeOAuthTokenManager({
 			providerSettingsManager: this.settings,
 			telemetry: options.telemetry,
+			resolveAuthHandler: (providerId) =>
+				providerId === this.clineAuthHandler.providerId
+					? this.clineAuthHandler
+					: undefined,
 			onCredentialsRefreshed: (previous, next) => {
 				const scope = this.scope;
 				// A refresh rotates credentials without changing this controller's account.
@@ -364,7 +378,7 @@ export class HubCloudSessionService {
 				return undefined;
 			}
 			if (!token) {
-				token = getProviderAuthHandler("cline")?.getApiKey(
+				token = this.clineAuthHandler.getApiKey(
 					this.settings.getProviderSettings("cline"),
 				);
 			}

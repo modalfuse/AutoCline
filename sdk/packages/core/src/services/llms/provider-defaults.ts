@@ -185,16 +185,6 @@ async function mergeKnownModels(
 			...userKnownModels,
 		});
 	}
-	if (providerId === "cline-pass" && Object.keys(liveModels).length > 0) {
-		// Keep the catalog's intentional order (pass models first, free models
-		// after) instead of re-sorting by release date: the first live model is
-		// the fallback default when the bundled default id rotates out of the
-		// live list, and it must stay a subscription model, not a free one.
-		return {
-			...liveModels,
-			...userKnownModels,
-		};
-	}
 	const knownModelsWithoutUserOverrides = Llms.sortModelsByReleaseDate({
 		...generated,
 		...defaultKnownModels,
@@ -202,26 +192,6 @@ async function mergeKnownModels(
 		...privateModels,
 		...publicModels,
 	});
-
-	if (providerId === "cline") {
-		// Cline recommendations can use Vercel-style ids while the broader
-		// catalog includes OpenRouter aliases for the same models. Image-output
-		// models are temporarily unavailable through Cline's inference backend,
-		// so filter them only at the Cline catalog boundary. buildClineModels
-		// applies the same restriction to the bundled catalog. User overrides are
-		// also subject to this filter — the backend rejects image output
-		// regardless of where the model was configured. Remove both filter call
-		// sites together when the backend gains image-output support.
-		return Llms.sortModelsByReleaseDate(
-			Llms.filterImageOutputModels({
-				...Llms.preferCanonicalModelIds(
-					knownModelsWithoutUserOverrides,
-					Llms.VERCEL_OPENROUTER_MODEL_ID_ALIAS_RULES,
-				),
-				...userKnownModels,
-			}),
-		);
-	}
 
 	return Llms.sortModelsByReleaseDate({
 		...knownModelsWithoutUserOverrides,
@@ -574,6 +544,43 @@ async function describeLiteLlmHttpFailure(response: Response): Promise<string> {
 	return `HTTP ${response.status}${bodyText}`;
 }
 
+
+const LITELLM_VENDOR_LABELS: Record<string, string> = {
+	deepseek: "DeepSeek",
+	dashscope: "DashScope",
+	openai: "OpenAI",
+	anthropic: "Anthropic",
+	google: "Google",
+	gemini: "Gemini",
+	ollama: "Ollama",
+	qwen: "Qwen",
+	moonshot: "Moonshot",
+	zhipu: "Zhipu",
+	glm: "GLM",
+};
+
+/** Map LiteLLM upstream ids (vendor/model) to picker labels 厂商-模型. */
+export function formatLiteLlmVendorModelLabel(
+	upstreamModelId: string | undefined,
+	fallbackName: string,
+): string {
+	const upstream = upstreamModelId?.trim();
+	if (!upstream) return fallbackName;
+	const slash = upstream.indexOf("/");
+	if (slash <= 0 || slash === upstream.length - 1) {
+		return upstream;
+	}
+	const vendorRaw = upstream.slice(0, slash);
+	const modelRaw = upstream.slice(slash + 1);
+	const vendorKey = vendorRaw.toLowerCase();
+	const vendor =
+		LITELLM_VENDOR_LABELS[vendorKey] ??
+		(vendorRaw.length === 0
+			? vendorRaw
+			: vendorRaw.charAt(0).toUpperCase() + vendorRaw.slice(1));
+	return `${vendor}-${modelRaw}`;
+}
+
 async function fetchLiteLlmPrivateModels(
 	config: ProviderConfig,
 	token: string,
@@ -603,29 +610,24 @@ async function fetchLiteLlmPrivateModels(
 					const entries = payload?.data ?? [];
 					const models: Record<string, ModelInfo> = {};
 					for (const model of entries) {
-						const displayName = model.model_name?.trim();
-						const actualModelId = model.litellm_params?.model?.trim();
-						const modelId = actualModelId || displayName;
+						// Router calls must use model_name; do not also index the
+						// underlying litellm_params.model or the picker doubles every row.
+						const routeName = model.model_name?.trim();
+						const upstreamModelId = model.litellm_params?.model?.trim();
+						const modelId = routeName || upstreamModelId;
 						if (!modelId) {
 							continue;
 						}
 						const info = model.model_info;
-						const converted = buildModelFromPrivateSource(modelId, {
-							name: displayName ?? modelId,
+						// Display the LiteLLM route/alias alone — never name+(upstream).
+						models[modelId] = buildModelFromPrivateSource(modelId, {
+							name: modelId,
 							maxTokens: info?.max_output_tokens ?? info?.max_tokens,
 							maxInputTokens: info?.max_input_tokens ?? info?.max_tokens,
 							supportsImages: info?.supports_vision,
 							supportsPromptCache: info?.supports_prompt_caching,
 							supportsReasoning: info?.supports_reasoning,
 						});
-						models[modelId] = converted;
-						if (displayName) {
-							models[displayName] = {
-								...converted,
-								id: displayName,
-								name: displayName,
-							};
-						}
 					}
 					return models;
 				}
@@ -820,7 +822,6 @@ async function getPrivateProviderModels(
 
 async function fetchLiveModelsCatalog(
 	url: string,
-	includeClineCloudModels: boolean,
 ): Promise<Record<string, Record<string, ModelInfo>>> {
 	// Bound both catalog sources, including response-body reads, while keeping
 	// any cancellation supplied by the source fetcher.
@@ -837,21 +838,15 @@ async function fetchLiveModelsCatalog(
 		},
 		globalThis.fetch,
 	);
-	return Llms.fetchLiveProviderModels(url, fetchWithTimeout, {
-		includeClineCloudModels,
-	});
+	return Llms.fetchLiveProviderModels(url, fetchWithTimeout);
 }
 
 export async function getLiveModelsCatalog(
-	options: Pick<
-		ModelCatalogConfig,
-		"url" | "cacheTtlMs" | "includeClineCloudModels"
-	> = {},
+	options: Pick<ModelCatalogConfig, "url" | "cacheTtlMs"> = {},
 ): Promise<Record<string, Record<string, ModelInfo>>> {
 	const url = options.url ?? DEFAULT_MODELS_CATALOG_URL;
 	const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_MODELS_CATALOG_CACHE_TTL_MS;
-	const includeClineCloudModels = options.includeClineCloudModels === true;
-	const cacheKey = `${url}\0cloud=${includeClineCloudModels}`;
+	const cacheKey = url;
 	const now = Date.now();
 
 	const cached = MODELS_CATALOG_CACHE.get(cacheKey);
@@ -864,7 +859,7 @@ export async function getLiveModelsCatalog(
 		return inFlight;
 	}
 
-	const request = fetchLiveModelsCatalog(url, includeClineCloudModels)
+	const request = fetchLiveModelsCatalog(url)
 		.then((data) => {
 			MODELS_CATALOG_CACHE.set(cacheKey, {
 				data,
@@ -882,11 +877,8 @@ export async function getLiveModelsCatalog(
 
 export function clearLiveModelsCatalogCache(url?: string): void {
 	if (url) {
-		for (const includeClineCloudModels of [false, true]) {
-			const cacheKey = `${url}\0cloud=${includeClineCloudModels}`;
-			MODELS_CATALOG_CACHE.delete(cacheKey);
-			MODELS_CATALOG_IN_FLIGHT.delete(cacheKey);
-		}
+		MODELS_CATALOG_CACHE.delete(url);
+		MODELS_CATALOG_IN_FLIGHT.delete(url);
 		return;
 	}
 

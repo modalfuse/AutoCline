@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import http from "node:http";
+import type { Duplex } from "node:stream";
 import { URL } from "node:url";
 import {
 	CURRENT_HUB_PROTOCOL_VERSION,
@@ -27,6 +28,10 @@ import {
 	writeHubDiscovery,
 } from "../discovery";
 import { resolveDefaultHubPort } from "../discovery/defaults";
+import {
+	isWildcardListenHost,
+	validateListenHosts,
+} from "../discovery/hub-config";
 import {
 	HubInstanceLock,
 	isHubLockHeldError,
@@ -344,16 +349,50 @@ export function isLocalHubOrigin(
 	}
 }
 
+/**
+ * Resolves every address the Hub listener should bind. `host` stays the
+ * primary (loopback) endpoint that discovery and clients use; `listenHosts`
+ * adds the remaining configured addresses (for example the host's Tailscale
+ * IP) to the same listener. Wildcards are rejected here as well as in config
+ * parsing so a programmatic caller cannot bind every interface by accident.
+ */
+function resolveListenerHosts(options: HubWebSocketServerOptions): string[] {
+	const requested = [
+		...(options.host ? [options.host] : []),
+		...(options.listenHosts ?? []),
+	];
+	if (requested.length === 0) {
+		return ["127.0.0.1"];
+	}
+	for (const candidate of requested) {
+		const trimmed = candidate.trim();
+		if (!trimmed) {
+			continue;
+		}
+		if (isWildcardListenHost(trimmed)) {
+			throw new Error(
+				`Refusing to bind Hub to wildcard address "${trimmed}". List concrete addresses instead (e.g. 127.0.0.1 and the host's Tailscale IP).`,
+			);
+		}
+	}
+	return validateListenHosts(requested, "hub server options");
+}
+
 export async function startHubWebSocketServer(
 	options: HubWebSocketServerOptions,
 ): Promise<HubWebSocketServer> {
 	const owner = options.owner ?? resolveHubOwnerContext();
-	const host = options.host ?? "127.0.0.1";
+	const listenHosts = resolveListenerHosts(options);
+	const host = listenHosts[0] ?? "127.0.0.1";
+	const extraHosts = listenHosts.slice(1);
 	const pathname = options.pathname ?? "/hub";
 	const configuredPort = options.port ?? resolveDefaultHubPort();
 	const requestedPort = configuredPort;
 	let port = requestedPort;
 	let url = createHubServerUrl(host, requestedPort, pathname);
+	let urls = listenHosts.map((listenHost) =>
+		createHubServerUrl(listenHost, requestedPort, pathname),
+	);
 	const buildId = resolveHubBuildId();
 	const buildEpochMs = resolveHubBuildEpochMs();
 	const authToken = createHubAuthToken();
@@ -403,6 +442,9 @@ export async function startHubWebSocketServer(
 		startedAt,
 	} as const;
 	const sockets = new Set<TrackedNodeWebSocket>();
+	// One http listener per configured address: Node/Bun allow a single
+	// `listen()` per server object, so a multi-address Hub needs one each.
+	const servers: http.Server[] = [];
 	let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 	let closeHandle: HubWebSocketServerClose | undefined;
 	let exposedServer: HubWebSocketServer | undefined;
@@ -432,15 +474,22 @@ export async function startHubWebSocketServer(
 				resolve();
 			});
 		});
-		const listenerClosed = new Promise<void>((resolve, reject) => {
-			server.close((error) => {
-				if (error) {
-					reject(error);
-					return;
-				}
-				resolve();
-			});
-		});
+		// A Hub bound to several addresses owns one http listener per address;
+		// all of them close before the close callback reports completion.
+		const listenerClosed = Promise.all(
+			servers.map(
+				(listenServer) =>
+					new Promise<void>((resolve, reject) => {
+						listenServer.close((error) => {
+							if (error) {
+								reject(error);
+								return;
+							}
+							resolve();
+						});
+					}),
+			),
+		).then(() => undefined);
 		const transportStopped = Promise.resolve().then(() => transport.stop());
 		const discoveryRetired = transportStopped.then(async () => {
 			await clearHubDiscoveryIfOwned(owner.discoveryPath, hubId);
@@ -489,7 +538,10 @@ export async function startHubWebSocketServer(
 	};
 	const closeServer = (): Promise<void> => beginClose().closed;
 
-	const server = http.createServer((req, res) => {
+	const requestHandler = (
+		req: http.IncomingMessage,
+		res: http.ServerResponse,
+	) => {
 		if (!published) {
 			res.statusCode = 503;
 			res.end("Starting");
@@ -533,6 +585,9 @@ export async function startHubWebSocketServer(
 				host,
 				port,
 				url,
+				// Multi-listen (AutoCline v1.2): every address this Hub serves.
+				listenHosts,
+				urls,
 				updatedAt: new Date().toISOString(),
 			} satisfies HubServerDiscoveryRecord);
 			res.statusCode = 200;
@@ -645,7 +700,7 @@ export async function startHubWebSocketServer(
 		}
 		res.statusCode = 404;
 		res.end("Not found");
-	});
+	};
 	const wss = new WebSocketServer({ noServer: true });
 	heartbeatTimer = setInterval(() => {
 		for (const websocket of sockets) {
@@ -673,7 +728,11 @@ export async function startHubWebSocketServer(
 		}
 	}, HUB_SOCKET_HEARTBEAT_INTERVAL_MS);
 
-	server.on("upgrade", (request, socket, head) => {
+	const upgradeHandler = (
+		request: http.IncomingMessage,
+		socket: Duplex,
+		head: Buffer,
+	) => {
 		if (!published) {
 			rejectStartingUpgradeSocket(socket);
 			return;
@@ -731,9 +790,22 @@ export async function startHubWebSocketServer(
 		} catch {
 			rejectUpgradeSocket(socket);
 		}
-	});
+	};
+
+	const createListener = () => {
+		const listenServer = http.createServer(requestHandler);
+		listenServer.on("upgrade", upgradeHandler);
+		servers.push(listenServer);
+		return listenServer;
+	};
+	const server = createListener();
 
 	try {
+		// Bind the primary (loopback) address first so the port is chosen there,
+		// then attach every additional configured address to the same listener.
+		// A secondary bind that fails rolls the whole startup back rather than
+		// leaving the Hub half-published on one of the addresses an operator
+		// explicitly asked for.
 		await new Promise<void>((resolve, reject) => {
 			server.once("error", (error) => {
 				reject(
@@ -760,6 +832,41 @@ export async function startHubWebSocketServer(
 				url = createHubServerUrl(host, port, pathname);
 				resolve();
 			});
+		});
+		for (const listenHost of extraHosts) {
+			const extraServer = createListener();
+			try {
+				await new Promise<void>((resolve, reject) => {
+					extraServer.once("error", (error) => {
+						reject(
+							formatHubStartupError(error, {
+								host: listenHost,
+								port,
+								pathname,
+							}),
+						);
+					});
+					extraServer.listen(port, listenHost, () => {
+						resolve();
+					});
+				});
+			} catch (error) {
+				throw new Error(
+					`Failed to bind Hub to configured address ${listenHost}:${port} (${
+						error instanceof Error ? error.message : String(error)
+					}). Check that the address exists on this host (e.g. Tailscale is up) or remove it from the Hub listenHosts list.`,
+					{ cause: error },
+				);
+			}
+		}
+		urls = listenHosts.map((listenHost) =>
+			createHubServerUrl(listenHost, port, pathname),
+		);
+		logHubMessage("info", "listen.bound", {
+			hosts: listenHosts,
+			port,
+			pathname,
+			urls,
 		});
 	} catch (error) {
 		if (heartbeatTimer) {
@@ -794,6 +901,8 @@ export async function startHubWebSocketServer(
 			host,
 			port,
 			url,
+			listenHosts: [...listenHosts],
+			urls: [...urls],
 			pid: process.pid,
 			startedAt,
 			updatedAt: startedAt,
@@ -810,8 +919,10 @@ export async function startHubWebSocketServer(
 		);
 		if (!rollbackSettled) {
 			try {
-				server.closeAllConnections();
-				server.unref();
+				for (const listenServer of servers) {
+					listenServer.closeAllConnections();
+					listenServer.unref();
+				}
 			} catch {
 				// The original publication error remains authoritative. The owning
 				// daemon will take its fatal process-exit path after this rejects.
@@ -824,6 +935,8 @@ export async function startHubWebSocketServer(
 		host,
 		port,
 		url,
+		listenHosts: [...listenHosts],
+		urls: [...urls],
 		authToken,
 		beginClose,
 		close: closeServer,

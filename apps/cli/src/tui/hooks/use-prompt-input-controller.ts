@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { shouldExpandSkillSlashCommands } from "../../runtime/prompt";
-import { formatCliErrorMessage } from "../../utils/cline-pass-errors";
+import { formatCliErrorMessage } from "../../utils/errors";
 import { shouldShowCliUsageCost } from "../../utils/usage-cost-display";
 import type { SlashCommandRegistry } from "../commands/slash-command-registry";
 import {
@@ -386,7 +386,7 @@ export function usePromptInputController(input: {
 				if (!turnErrorReportedRef.current) {
 					session.appendEntry({
 						kind: "error",
-						text: formatCliErrorMessage(error, { modelId }),
+						text: formatCliErrorMessage(error),
 					});
 				}
 			} finally {

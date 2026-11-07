@@ -83,6 +83,9 @@ vi.mock("@shared/services/Logger", () => ({
 // ---------------------------------------------------------------------------
 
 let tempDir: string
+
+// Public SAP AI Core model ID used as a test fixture (not a credential).
+const TEST_SELECTED_MODEL_ID = "anthropic--claude-4.6-sonnet"
 const previousGlobalSettingsPath = process.env.CLINE_GLOBAL_SETTINGS_PATH
 const previousDataDir = process.env.CLINE_DATA_DIR
 
@@ -143,10 +146,12 @@ function makeBaseConfig(overrides: Partial<CoreSessionConfig> = {}): CoreSession
 // ---------------------------------------------------------------------------
 
 describe("getDefaultModelIdForProvider", () => {
-	it("uses the SDK provider catalog for the Cline default model", () => {
-		expect(getDefaultModelIdForProvider("cline")).toBe(
-			LlmsModels.MODEL_COLLECTIONS_BY_PROVIDER_ID.cline.provider.defaultModelId,
-		)
+	it("has no local default model for the removed cline provider", () => {
+		// `cline` / `cline-pass` were removed from the SDK provider catalog. A
+		// stale config that still names them must not silently resolve to a
+		// local default model (the SDK collection no longer exists).
+		expect(LlmsModels.MODEL_COLLECTIONS_BY_PROVIDER_ID.cline).toBeUndefined()
+		expect(getDefaultModelIdForProvider("cline")).toBeUndefined()
 	})
 
 	it("uses the generated Gemini provider default", () => {
@@ -420,7 +425,7 @@ describe("buildSessionConfig", () => {
 		expect(config.systemPrompt).toContain(JSON.stringify("/tmp/workspace"))
 	})
 
-	it("resolves ClinePass from the shared Cline OAuth credentials", async () => {
+	it("resolves ClinePass from the shared Cline OAuth credentials", () => {
 		mocks.providerSettingsManager.getProviderSettings.mockImplementation((providerId?: string) => {
 			if (providerId !== "cline") {
 				return undefined
@@ -442,26 +447,32 @@ describe("buildSessionConfig", () => {
 		expect(mocks.providerSettingsManager.getProviderSettings).toHaveBeenCalledWith("cline")
 	})
 
-	it("preserves explicit ClinePass API keys from state before OAuth storage", () => {
+	it("reads preserved cloud storage for the retired cline-passApiKey slot instead of the configured token", () => {
 		mocks.providerSettingsManager.getProviderSettings.mockReturnValue({
 			provider: "cline",
 			auth: { accessToken: "workos:stored-token" },
 		} as any)
 
-		expect(resolveApiKey("cline-pass", { clineApiKey: "workos:configured-token" } as any)).toBe("workos:configured-token")
-		expect(mocks.providerSettingsManager.getProviderSettings).not.toHaveBeenCalled()
+		const apiKey = resolveApiKey("cline-pass", { clineApiKey: "workos:configured-token" } as any)
+
+		expect(apiKey).toBe("workos:stored-token")
+		expect(mocks.providerSettingsManager.getProviderSettings).toHaveBeenCalledTimes(1)
+		expect(mocks.providerSettingsManager.getProviderSettings).toHaveBeenCalledWith("cline")
+		expect(apiKey ?? "").not.toBe("workos:configured-token")
 	})
 
-	it("preserves explicit Cline API keys from state before OAuth storage", () => {
+	it("reads preserved cloud storage for the retired clineApiKey slot instead of the configured token", () => {
 		mocks.providerSettingsManager.getProviderSettings.mockReturnValue({
 			provider: "cline",
 			auth: { accessToken: "workos:stored-token" },
 		} as any)
 
-		expect(resolveApiKey("cline", { clineApiKey: "workos:configured-cline-token" } as any)).toBe(
-			"workos:configured-cline-token",
-		)
-		expect(mocks.providerSettingsManager.getProviderSettings).not.toHaveBeenCalled()
+		const apiKey = resolveApiKey("cline", { clineApiKey: "workos:configured-cline-token" } as any)
+
+		expect(apiKey).toBe("workos:stored-token")
+		expect(mocks.providerSettingsManager.getProviderSettings).toHaveBeenCalledTimes(1)
+		expect(mocks.providerSettingsManager.getProviderSettings).toHaveBeenCalledWith("cline")
+		expect(apiKey ?? "").not.toBe("workos:configured-cline-token")
 	})
 
 	it("resolves OpenAI Compatible API keys from migrated SDK provider settings", () => {
@@ -1298,7 +1309,7 @@ describe("buildSessionConfig", () => {
 	it("builds structured SAP AI Core config from legacy ApiConfiguration fields", async () => {
 		mocks.stateManager.getApiConfiguration.mockReturnValue({
 			actModeApiProvider: "sapaicore",
-			actModeApiModelId: "anthropic--claude-4.6-sonnet",
+			actModeApiModelId: TEST_SELECTED_MODEL_ID,
 			sapAiCoreClientId: "sap-client",
 			sapAiCoreClientSecret: "sap-secret",
 			sapAiCoreBaseUrl: " https://api.ai.example.aws.ml.hana.ondemand.com ",
@@ -1333,7 +1344,7 @@ describe("buildSessionConfig", () => {
 	it("defaults SAP AI Core to orchestration mode and omits deployment id when mode is unset", async () => {
 		mocks.stateManager.getApiConfiguration.mockReturnValue({
 			actModeApiProvider: "sapaicore",
-			actModeApiModelId: "anthropic--claude-4.6-sonnet",
+			actModeApiModelId: TEST_SELECTED_MODEL_ID,
 			sapAiCoreClientId: "sap-client",
 			sapAiCoreClientSecret: "sap-secret",
 			sapAiCoreBaseUrl: "https://api.ai.example.aws.ml.hana.ondemand.com",
@@ -1360,7 +1371,7 @@ describe("buildSessionConfig", () => {
 	it("omits SAP AI Core deployment id when orchestration mode is enabled", async () => {
 		mocks.stateManager.getApiConfiguration.mockReturnValue({
 			actModeApiProvider: "sapaicore",
-			actModeApiModelId: "anthropic--claude-4.6-sonnet",
+			actModeApiModelId: TEST_SELECTED_MODEL_ID,
 			sapAiCoreClientId: "sap-client",
 			sapAiCoreClientSecret: "sap-secret",
 			sapAiCoreBaseUrl: "https://api.ai.example.aws.ml.hana.ondemand.com",
@@ -1394,7 +1405,7 @@ describe("buildSessionConfig", () => {
 	it("preserves an explicitly cleared SAP base URL so stored settings cannot fill it back in", async () => {
 		mocks.stateManager.getApiConfiguration.mockReturnValue({
 			actModeApiProvider: "sapaicore",
-			actModeApiModelId: "anthropic--claude-4.6-sonnet",
+			actModeApiModelId: TEST_SELECTED_MODEL_ID,
 			sapAiCoreBaseUrl: "   ",
 		} as any)
 
@@ -1411,7 +1422,7 @@ describe("buildSessionConfig", () => {
 	it("does not emit partial SAP overrides when SAP strings are absent", async () => {
 		mocks.stateManager.getApiConfiguration.mockReturnValue({
 			actModeApiProvider: "sapaicore",
-			actModeApiModelId: "anthropic--claude-4.6-sonnet",
+			actModeApiModelId: TEST_SELECTED_MODEL_ID,
 			sapAiCoreUseOrchestrationMode: false,
 		} as any)
 
@@ -1427,7 +1438,7 @@ describe("buildSessionConfig", () => {
 	it("uses ClinePass model storage and omits empty nested apiKey so SDK OAuth can fill it", async () => {
 		mocks.stateManager.getApiConfiguration.mockReturnValue({
 			actModeApiProvider: "cline-pass",
-			actModeClinePassModelId: "cline-pass/glm-5.2",
+			actModeApiModelId: "cline-pass/glm-5.2",
 		} as any)
 		mocks.providerSettingsManager.getProviderSettings.mockReturnValue(undefined)
 

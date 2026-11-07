@@ -1,13 +1,12 @@
-import { buildModelInfoNameMap, type ModelInfo, resolveClinePassModelInfo } from "@shared/api"
+import type { ModelInfo } from "@shared/api"
 import { CLINE_ONBOARDING_MODELS } from "@shared/cline/onboarding"
 import { EmptyRequest } from "@shared/proto/cline/common"
 import type { ClineRecommendedModel } from "@shared/proto/cline/models"
 import type { OnboardingModel, OnboardingModelGroup } from "@shared/proto/cline/state"
 import { useEffect, useMemo, useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
-import { useProviderModels } from "@/hooks/useProviderModels"
 import { ModelsServiceClient } from "@/services/grpc-client"
-import { CLINEPASS_GROUP, getRecommendedModelsData, type RecommendedModelsData } from "./data-models"
+import { getRecommendedModelsData, type RecommendedModelsData } from "./data-models"
 
 type OnboardingModelsStatus = "loading" | "success" | "empty"
 
@@ -51,7 +50,6 @@ type FetchState = { status: "loading" } | { status: "success"; data: Recommended
 
 export function useOnboardingModels(): UseOnboardingModelsResult {
 	const { openRouterModels } = useExtensionState()
-	const { models: clineModels } = useProviderModels("cline")
 	const [fetchState, setFetchState] = useState<FetchState>({ status: "loading" })
 
 	useEffect(() => {
@@ -82,15 +80,7 @@ export function useOnboardingModels(): UseOnboardingModelsResult {
 		}
 	}, [])
 
-	// Merge openRouter and cline models into a single catalog for lookups
-	const modelCatalog = useMemo<Record<string, ModelInfo>>(() => {
-		return { ...openRouterModels, ...(clineModels ?? {}) }
-	}, [openRouterModels, clineModels])
-
-	// ClinePass model IDs omit the upstream lab (e.g. "cline-pass/glm-5.2"), so look up
-	// capabilities via the model slug against the OpenRouter catalog, falling back to
-	// conservative ClinePass defaults. Mirrors ClinePassProvider's resolution.
-	const openRouterModelsByName = useMemo(() => buildModelInfoNameMap(openRouterModels), [openRouterModels])
+	const modelCatalog = openRouterModels as Record<string, ModelInfo>
 
 	return useMemo<UseOnboardingModelsResult>(() => {
 		if (fetchState.status !== "success") {
@@ -100,11 +90,7 @@ export function useOnboardingModels(): UseOnboardingModelsResult {
 		const { data } = fetchState
 		const freeModels = data.free.map((rec) => toOnboardingModel(rec, "free", "Free", modelCatalog))
 		const frontierModels = data.recommended.map((rec) => toOnboardingModel(rec, "frontier", "", modelCatalog))
-		const clinePassCatalog = Object.fromEntries(
-			data.clinePass.map((rec) => [rec.id, resolveClinePassModelInfo(rec.id, openRouterModelsByName)]),
-		)
-		const clinePassModels = data.clinePass.map((rec) => toOnboardingModel(rec, CLINEPASS_GROUP, "", clinePassCatalog))
 
-		return { status: "success", models: { models: [...clinePassModels, ...freeModels, ...frontierModels] } }
-	}, [fetchState, modelCatalog, openRouterModelsByName])
+		return { status: "success", models: { models: [...freeModels, ...frontierModels] } }
+	}, [fetchState, modelCatalog])
 }

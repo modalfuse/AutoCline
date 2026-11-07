@@ -1,5 +1,4 @@
 import type { WorkspaceContext } from "../extensions/context";
-import { isClineProvider } from "../providers/utils";
 import type { WorkspaceInfo } from "../session/workspace";
 import { DEFAULT_CLINE_SYSTEM_PROMPTS } from "./system";
 
@@ -137,8 +136,6 @@ export interface ClineSystemPromptOptions
 	workspaceRoot?: string;
 	/** Per-request system prompt override */
 	overridePrompt?: string;
-	/** Provider ID — used to gate Cline-specific metadata injection */
-	providerId?: string;
 	/**
 	 * Whether the host exposes the switch_to_act_mode tool in plan mode.
 	 * Defaults to true (CLI behavior). Hosts that require the user to flip the
@@ -160,16 +157,12 @@ export function buildClineSystemPrompt(
 		metadata,
 		rules,
 		overridePrompt,
-		providerId,
 		planModeSwitchTool = true,
 	} = options;
 	const workspaceRoot = options.workspaceRoot ?? options.rootPath ?? "";
-	const isCline = isClineProvider(providerId || "");
-
 	if (overridePrompt?.trim()) {
 		const trimmed = overridePrompt.trim();
 		if (
-			isCline &&
 			metadata?.trim() &&
 			!trimmed.includes(WORKSPACE_CONFIGURATION_MARKER)
 		) {
@@ -204,9 +197,7 @@ export function buildClineSystemPrompt(
 		.replace("{{IDE_NAME}}", ide)
 		.replace(
 			"{{CLINE_METADATA}}",
-			isCline
-				? buildWorkspaceMetadata(workspaceRoot, workspaceName, metadata)
-				: "",
+			buildWorkspaceMetadata(workspaceRoot, workspaceName, metadata),
 		)
 		.replace("{{CLINE_RULES}}", effectiveRules)
 		.trim();

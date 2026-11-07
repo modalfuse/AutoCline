@@ -435,7 +435,6 @@ function titleCaseFromId(id: string): string {
 
 export async function listLocalProviders(
 	manager: ProviderSettingsManager,
-	options: { isClinePassEnabled?: boolean } = {},
 ): Promise<{ providers: Array<Record<string, unknown>>; settingsPath: string }> {
 	const state = manager.read()
 	const providers = Object.entries(MODEL_COLLECTIONS_BY_PROVIDER_ID)
@@ -457,7 +456,6 @@ export async function listLocalProviders(
 				baseUrlDescription: "The base endpoint to use for provider requests.",
 			}
 		})
-		.filter((provider) => options.isClinePassEnabled === true || provider.id !== "cline-pass")
 		.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
 
 	return { providers, settingsPath: manager.getFilePath() }

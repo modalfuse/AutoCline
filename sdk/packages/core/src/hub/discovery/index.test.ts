@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	clearHubDiscovery,
 	clearHubDiscoveryIfOwned,
+	createHubServerUrl,
 	getManagedHubCompatibility,
 	isManagedHubReusable,
 	probeHubServer,
@@ -266,6 +267,35 @@ describe("hub discovery", () => {
 			).rejects.toThrow("Hub discovery record");
 		}
 		await clearHubDiscovery(discoveryPath);
+	});
+
+	it("serializes a raw IPv6 host with brackets", () => {
+		// Regression: `ws://::1:25463/hub` is an invalid URL because the parser
+		// treats the first colon after the scheme as the port separator, which
+		// crashed the second bind when listening on `::1`.
+		expect(createHubServerUrl("::1", 25463)).toBe("ws://[::1]:25463/hub");
+		expect(createHubServerUrl("::1", 25463, "/other")).toBe(
+			"ws://[::1]:25463/other",
+		);
+	});
+
+	it("does not double-bracket an already bracketed IPv6 host", () => {
+		expect(createHubServerUrl("[::1]", 25463)).toBe("ws://[::1]:25463/hub");
+		expect(createHubServerUrl("[::1]", 25463, "/other")).toBe(
+			"ws://[::1]:25463/other",
+		);
+	});
+
+	it("leaves IPv4 and DNS hosts unchanged", () => {
+		expect(createHubServerUrl("127.0.0.1", 25463)).toBe(
+			"ws://127.0.0.1:25463/hub",
+		);
+		expect(createHubServerUrl("localhost", 25463)).toBe(
+			"ws://localhost:25463/hub",
+		);
+		expect(createHubServerUrl("hub.example.com", 0, "/path")).toBe(
+			"ws://hub.example.com:0/path",
+		);
 	});
 
 	it("propagates discovery read errors instead of reporting absence", async () => {

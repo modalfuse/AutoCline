@@ -462,12 +462,15 @@ fn resolve_desktop_backend_script_path(context: &AppContext) -> Option<PathBuf> 
     candidates.into_iter().find(|path| path.exists())
 }
 
-/// The bundled Cline CLI (a Tauri `externalBin`). It starts or reuses the
-/// shared Hub, runs as the Hub daemon, and is the runtime the packaged
-/// desktop backend script executes on, so the app needs no Node or Bun.
+/// The bundled AutoCline Hub runtime (a Tauri `externalBin`). It is the Cline
+/// CLI source compiled as `autocline-cli`, so it never collides with the
+/// official Cline app's `cline-cli` (e.g. `/Applications/Cline.app/Contents/
+/// MacOS/cline-cli`, `/usr/bin/cline-cli`). It starts or reuses the shared Hub,
+/// runs as the Hub daemon, and is the runtime the packaged desktop backend
+/// script executes on, so the app needs no Node or Bun.
 fn desktop_cli_binary_names() -> Vec<String> {
     let extension = if cfg!(windows) { ".exe" } else { "" };
-    let bundled_name = format!("cline-cli{extension}");
+    let bundled_name = format!("autocline-cli{extension}");
     let target_triple = option_env!("TAURI_ENV_TARGET_TRIPLE").unwrap_or("").trim();
     if target_triple.is_empty() {
         return vec![bundled_name];
@@ -475,7 +478,7 @@ fn desktop_cli_binary_names() -> Vec<String> {
 
     vec![
         bundled_name,
-        format!("cline-cli-{target_triple}{extension}"),
+        format!("autocline-cli-{target_triple}{extension}"),
     ]
 }
 
@@ -1519,9 +1522,11 @@ fn setup_tray_icon(
         .text(TRAY_QUIT_MENU_ID, "Quit")
         .build()?;
 
-    // This is the same glyph used by webview/components/cline-logo.tsx,
-    // rasterized without a background. Template mode lets macOS tint it for
-    // the current menu-bar appearance.
+    // AutoCline color line-art glyph (assets/brand/AutoCline-icon-line-color-transparent.png),
+    // LANCZOS-downscaled to 88x88 with ~8% padding. It is intentionally NOT a
+    // template image: the strokes are dark blue / royal blue / teal and must be
+    // drawn as-is (only the icon interior shows through to the menu bar), so
+    // icon_as_template(false) is set below.
     #[cfg(target_os = "macos")]
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray/cline-template.png"))?;
     #[cfg(not(target_os = "macos"))]
@@ -1535,7 +1540,7 @@ fn setup_tray_icon(
         .menu(&menu)
         .tooltip(tray_tooltip_text(app.package_info().name.as_str(), 0));
     #[cfg(target_os = "macos")]
-    let tray = tray.icon_as_template(true);
+    let tray = tray.icon_as_template(false);
 
     tray.on_menu_event(|app, event| match event.id().as_ref() {
         TRAY_OPEN_MENU_ID => show_main_window(app),
@@ -1591,7 +1596,115 @@ fn set_tray_status(
     Ok(())
 }
 
+
+/// Resolves `~/.autocline`, honoring an explicit `AUTOCLINE_ROOT`.
+fn resolve_autocline_root() -> Result<PathBuf, String> {
+    if let Some(explicit) = non_empty_env("AUTOCLINE_ROOT") {
+        return Ok(PathBuf::from(explicit));
+    }
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "neither HOME nor USERPROFILE is set".to_string())?;
+    Ok(PathBuf::from(home).join(".autocline"))
+}
+
+fn is_same_or_inside_path(target: &Path, base: &Path) -> bool {
+    // Compare lexically on resolved absolute paths: the target file usually does
+    // not exist yet, so `canonicalize()` would fail and a config path like
+    // `~/.cline/data/settings/...` must still be recognized as outside.
+    let absolute = |path: &Path| -> PathBuf {
+        let joined = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(path))
+                .unwrap_or_else(|_| path.to_path_buf())
+        };
+        let mut normalized = PathBuf::new();
+        for component in joined.components() {
+            match component {
+                std::path::Component::ParentDir => {
+                    normalized.pop();
+                }
+                std::path::Component::CurDir => {}
+                other => normalized.push(other.as_os_str()),
+            }
+        }
+        normalized
+    };
+    absolute(target).starts_with(absolute(base))
+}
+
+/// Sets process env so every Cline component that this app spawns starts on the
+/// AutoCline root, even when launched from Finder/Dock (which hands the app
+/// launchd's environment, with no shell override to lean on).
+///
+/// An explicit value that already points outside the root is left exactly as
+/// given and reported: this build must never silently rewrite a deliberate
+/// `CLINE_DIR=~/.cline` into the official app's state, and it must never
+/// silently drop the user's choice either.
+fn apply_autocline_data_root() -> Result<(), String> {
+    let root = resolve_autocline_root()?;
+    let data_dir = root.join("data");
+    fs::create_dir_all(&root).map_err(|e| format!("failed to create {}: {e}", root.display()))?;
+    fs::create_dir_all(&data_dir)
+        .map_err(|e| format!("failed to create {}: {e}", data_dir.display()))?;
+
+    let expected: [(&str, PathBuf); 12] = [
+        ("CLINE_DIR", root.clone()),
+        ("CLINE_DATA_DIR", data_dir.clone()),
+        ("CLINE_SESSION_DATA_DIR", data_dir.join("sessions")),
+        ("CLINE_TEAM_DATA_DIR", data_dir.join("teams")),
+        ("CLINE_CONNECTOR_DATA_DIR", data_dir.join("connectors")),
+        ("CLINE_DB_DATA_DIR", data_dir.join("db")),
+        (
+            "CLINE_PROVIDER_SETTINGS_PATH",
+            data_dir.join("settings").join("providers.json"),
+        ),
+        (
+            "CLINE_CONNECTOR_SETTINGS_PATH",
+            data_dir.join("connectors").join("settings.json"),
+        ),
+        (
+            "CLINE_MCP_SETTINGS_PATH",
+            data_dir.join("settings").join("cline_mcp_settings.json"),
+        ),
+        ("CLINE_HOOKS_LOG_PATH", data_dir.join("logs").join("hooks.jsonl")),
+        ("CLINE_KANBAN_DATA_DIR", root.join("apps").join("kanban")),
+        ("CLINE_HUB_CONFIG", root.join("config").join("hub.json")),
+    ];
+
+    let mut conflicts: Vec<String> = Vec::new();
+    for (key, value) in expected {
+        match non_empty_env(key) {
+            Some(incoming) => {
+                if !is_same_or_inside_path(Path::new(&incoming), &root) {
+                    conflicts.push(format!("{key}={incoming}"));
+                }
+            }
+            // SAFETY: called at the very top of `main`, before any thread or
+            // child process exists, so no concurrent env reader can race here.
+            None => unsafe { std::env::set_var(key, value) },
+        }
+    }
+    unsafe { std::env::set_var("AUTOCLINE_ROOT", &root) };
+    if !conflicts.is_empty() {
+        eprintln!(
+            "autocline: explicit Cline root overrides point outside {} and were left unchanged: {}",
+            root.display(),
+            conflicts.join(", ")
+        );
+    }
+    Ok(())
+}
+
 fn main() {
+    // Must run before the sidecar, the bundled CLI, and the Hub daemon start:
+    // they inherit this environment and select their state roots from it.
+    if let Err(error) = apply_autocline_data_root() {
+        eprintln!("autocline: failed to select the AutoCline data root: {error}");
+    }
+
     // Must stay first: WebKitGTK reads the environment while initializing,
     // and the variable has to be in place before any thread exists.
     #[cfg(target_os = "linux")]
@@ -1688,17 +1801,11 @@ fn main() {
         .on_window_event(|window, event| {
             if window.label() == MAIN_WINDOW_LABEL {
                 if let WindowEvent::CloseRequested { api, .. } = event {
+                    // AutoCline: fully quit when the window is closed instead of
+                    // hiding it in the background. The tray can still reopen if
+                    // clicked, but closing the window terminates the app.
                     api.prevent_close();
-                    // Without a tray (Linux with no StatusNotifier host, e.g.
-                    // stock GNOME) nothing could bring a hidden window back or
-                    // quit the app, so close quits instead, through the same
-                    // exit path as the tray's Quit item.
-                    #[cfg(target_os = "linux")]
-                    if !linux_tray::status_notifier_host_registered() {
-                        window.app_handle().exit(0);
-                        return;
-                    }
-                    hide_main_window(window);
+                    window.app_handle().exit(0);
                 }
             }
         })
@@ -1761,8 +1868,13 @@ mod tests {
     fn backend_bundle_uses_only_the_running_apps_resource_directory() {
         let relative = Path::new("bin").join("desktop-backend").join("index.js");
         for resource_dir in [
+            // AutoCline is the default install target; the Cline* entries stay
+            // listed because the fork is designed to run beside Cline.app.
+            Path::new("/Applications/AutoCline.app/Contents/Resources"),
             Path::new("/Applications/Cline.app/Contents/Resources"),
+            Path::new("C:/Program Files/AutoCline"),
             Path::new("C:/Program Files/Cline"),
+            Path::new("/usr/lib/AutoCline"),
             Path::new("/usr/lib/Cline"),
             Path::new("/usr/lib/Cline Beta"),
             Path::new("/usr/lib/Cline Nightly"),

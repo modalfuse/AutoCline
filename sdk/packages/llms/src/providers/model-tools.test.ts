@@ -8,8 +8,6 @@ import {
 
 describe("supportsModelTool", () => {
 	it.each([
-		["cline", undefined],
-		["cline-pass", undefined],
 		["anthropic", undefined],
 		["openai-native", undefined],
 		["openai-codex", undefined],

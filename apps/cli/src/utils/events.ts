@@ -3,7 +3,7 @@ import {
 	formatCompactionDividerLabel,
 	parseCompactionNoticeMetadata,
 } from "../tui/utils/compaction-status";
-import { formatCliErrorMessage } from "./cline-pass-errors";
+import { formatCliErrorMessage } from "./errors";
 import { materializeGeneratedMedia } from "./generated-media";
 import { formatToolInput, formatToolOutput, truncate } from "./helpers";
 import {
@@ -230,7 +230,7 @@ export function handleEvent(event: AgentEvent, config: Config): void {
 			closeInlineStreamIfNeeded();
 			if (!event.recoverable || config.verbose) {
 				writeErr(
-					formatCliErrorMessage(event.error, { modelId: config.modelId }),
+					formatCliErrorMessage(event.error),
 				);
 			}
 			break;

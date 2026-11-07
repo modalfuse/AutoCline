@@ -714,6 +714,18 @@ function App() {
 					return;
 				}
 
+				// Paint the remote draft immediately; the Hub connect continues in
+				// the sidecar background and reports back via
+				// `remote_environment_changed`.
+				const priorHome =
+					readWorkspaceSelectionFromWindow(environmentId).lastWorkspace?.trim() ||
+					"";
+				setActiveRemoteEnvironment({
+					id: environmentId,
+					homeDir: priorHome || "/",
+				});
+				selectEnvironmentDraft(environmentId);
+
 				const result =
 					await desktopClient.invoke<RemoteEnvironmentConnectResult>(
 						"connect_remote_environment",
@@ -732,11 +744,14 @@ function App() {
 						"The SSH host connected without a valid environment identity or home directory.",
 					);
 				}
+				if (result.status !== "connecting" && result.status !== "connected") {
+					throw new Error(`Unexpected remote connect status: ${String(result.status)}`);
+				}
 
 				const storedWorkspace = readWorkspaceSelectionFromWindow(
 					connectedEnvironmentId,
 				);
-				if (!storedWorkspace.lastWorkspace) {
+				if (!storedWorkspace.lastWorkspace && homeDir && homeDir !== "/") {
 					writeWorkspaceSelectionToWindow(connectedEnvironmentId, {
 						...storedWorkspace,
 						lastWorkspace: homeDir,
@@ -744,9 +759,10 @@ function App() {
 				}
 				setActiveRemoteEnvironment({
 					id: connectedEnvironmentId,
-					homeDir,
+					homeDir: homeDir === "/" && priorHome ? priorHome : homeDir,
 				});
 				selectEnvironmentDraft(connectedEnvironmentId);
+				void refreshSessionsRef.current();
 			} catch (error) {
 				toast({
 					title:
@@ -791,17 +807,38 @@ function App() {
 					environmentId?: unknown;
 					homeDir?: unknown;
 					workspaceRoot?: unknown;
+					message?: unknown;
 				};
 				if (
-					event.status === "connected" &&
-					typeof event.environmentId === "string" &&
-					typeof event.homeDir === "string"
+					(event.status === "connected" || event.status === "connecting") &&
+					typeof event.environmentId === "string"
 				) {
+					const homeDir =
+						(typeof event.homeDir === "string" && event.homeDir.trim()) ||
+						(typeof event.workspaceRoot === "string" &&
+							event.workspaceRoot.trim()) ||
+						"";
 					environmentSelectionRevision.current += 1;
 					selectLocalDraftWhenChatVisibleRef.current = false;
 					setActiveRemoteEnvironment({
 						id: event.environmentId,
-						homeDir: event.homeDir,
+						homeDir: homeDir || "/",
+					});
+					// The Hub is the only source of the session list: refresh once it
+					// reports the environment connected.
+					if (event.status === "connected") {
+						selectEnvironmentDraft(event.environmentId);
+						void refreshSessionsRef.current();
+					}
+				}
+				if (event.status === "error") {
+					toast({
+						title: "Unable to connect to SSH host",
+						description:
+							typeof event.message === "string"
+								? event.message
+								: "Remote Hub connect failed",
+						variant: "destructive",
 					});
 				}
 				if (event.status === "disconnected") {
@@ -1034,9 +1071,13 @@ function App() {
 		onUpdateSessionMetadata: handleUpdateSessionMetadata,
 	});
 	const sessionHistoryRef = useRef(sessionHistory.sessions);
+	const refreshSessionsRef = useRef(sessionHistory.refreshSessions);
 	useEffect(() => {
 		sessionHistoryRef.current = sessionHistory.sessions;
 	}, [sessionHistory.sessions]);
+	useEffect(() => {
+		refreshSessionsRef.current = sessionHistory.refreshSessions;
+	}, [sessionHistory.refreshSessions]);
 	const handleOpenSessionById = useCallback(
 		async (
 			sessionId: string,

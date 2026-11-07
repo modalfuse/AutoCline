@@ -10,6 +10,10 @@ import {
 } from "./provider-settings-legacy-migration";
 import { ProviderSettingsManager } from "./provider-settings-manager";
 
+// Public model IDs used as test fixtures (not credentials).
+const TEST_BEDROCK_MODEL_ID = "global.anthropic.claude-opus-4-6-v1";
+const TEST_SAP_AI_CORE_MODEL_ID = "anthropic--claude-4.6-sonnet";
+
 describe("migrateLegacyProviderSettings", () => {
 	const tempDirs: string[] = [];
 
@@ -507,7 +511,15 @@ describe("migrateLegacyProviderSettings", () => {
 		expect(manager.read().providers.cline?.tokenSource).toBe("migration");
 	});
 
-	it("falls back to the default Cline model when the legacy model id is unknown", () => {
+	it("preserves an unknown legacy Cline model id instead of inventing a default", () => {
+		// The local Cline catalog is intentionally no longer registered with the
+		// runtime, so migration has no catalog to normalize against. The user's
+		// persisted model choice must survive verbatim — falling back to a
+		// builtin default would silently change the model the user selected.
+		expect(
+			LlmsModels.getProviderCollectionSync("cline"),
+		).toBeUndefined();
+
 		const tempDir = mkdtempSync(
 			path.join(os.tmpdir(), "core-legacy-provider-"),
 		);
@@ -532,15 +544,25 @@ describe("migrateLegacyProviderSettings", () => {
 			JSON.stringify({ clineApiKey: "legacy-cline-key" }, null, 2),
 		);
 
-		migrateLegacyProviderSettings({
+		const result = migrateLegacyProviderSettings({
 			providerSettingsManager: manager,
 			dataDir: tempDir,
 		});
 
-		const expectedDefault =
-			LlmsModels.getProviderCollectionSync("cline")?.provider.defaultModelId;
-		expect(expectedDefault).toBeTruthy();
-		expect(manager.getProviderSettings("cline")?.model).toBe(expectedDefault);
+		expect(result).toMatchObject({
+			migrated: true,
+			providerCount: 1,
+			lastUsedProvider: "cline",
+		});
+		expect(manager.getProviderSettings("cline")).toEqual({
+			provider: "cline",
+			model: "some-model/that-no-longer-exists",
+			apiKey: "legacy-cline-key",
+		});
+		expect(manager.getProviderSettings("cline")?.model).toBe(
+			"some-model/that-no-longer-exists",
+		);
+		expect(manager.read().providers.cline?.tokenSource).toBe("migration");
 	});
 
 	it("keeps a legacy Cline model id the catalog knows", () => {
@@ -576,7 +598,15 @@ describe("migrateLegacyProviderSettings", () => {
 		expect(manager.getProviderSettings("cline")?.model).toBe("openai/gpt-5.5");
 	});
 
-	it("falls back to the default Cline model for suffixed variant ids like :1m", () => {
+	it("preserves a suffixed legacy Cline variant id like :1m without normalizing", () => {
+		// Suffixed variant ids (`:1m`, `:thinking`, ...) are user-facing Cline
+		// model choices. With the local catalog unregistered they cannot be
+		// resolved or folded, so migration must keep the exact id rather than
+		// rewriting it to an unknown/default model.
+		expect(
+			LlmsModels.getProviderCollectionSync("cline"),
+		).toBeUndefined();
+
 		const tempDir = mkdtempSync(
 			path.join(os.tmpdir(), "core-legacy-provider-"),
 		);
@@ -601,28 +631,36 @@ describe("migrateLegacyProviderSettings", () => {
 			JSON.stringify({ clineApiKey: "legacy-cline-key" }, null, 2),
 		);
 
-		migrateLegacyProviderSettings({
+		const result = migrateLegacyProviderSettings({
 			providerSettingsManager: manager,
 			dataDir: tempDir,
 		});
 
+		expect(result).toMatchObject({
+			migrated: true,
+			providerCount: 1,
+			lastUsedProvider: "cline",
+		});
+		expect(manager.getProviderSettings("cline")).toEqual({
+			provider: "cline",
+			model: "anthropic/claude-sonnet-4.5:1m",
+			apiKey: "legacy-cline-key",
+		});
 		expect(manager.getProviderSettings("cline")?.model).toBe(
-			LlmsModels.getProviderCollectionSync("cline")?.provider.defaultModelId,
+			"anthropic/claude-sonnet-4.5:1m",
 		);
+		expect(manager.read().providers.cline?.tokenSource).toBe("migration");
 	});
 
-	it("folds legacy alias Cline model ids onto their canonical catalog ids", () => {
-		// Legacy state stores OpenRouter spellings (e.g. `z-ai/...`) that the
-		// runtime catalog canonicalizes (to `zai/...`). Migration must keep the
-		// user's model under the canonical id instead of defaulting it away.
-		const catalogModels =
-			LlmsModels.getProviderCollectionSync("cline")?.models ?? {};
-		const canonicalModelId = Object.keys(catalogModels).find((modelId) =>
-			modelId.startsWith("zai/"),
-		);
-		expect(canonicalModelId).toBeTruthy();
-		const aliasModelId = `z-ai/${canonicalModelId?.slice("zai/".length)}`;
-		expect(catalogModels[aliasModelId]).toBeUndefined();
+	it("preserves a realistic legacy Cline alias model id such as z-ai/glm-5.2", () => {
+		// Legacy state stores OpenRouter spellings (e.g. `z-ai/...`) for Cline
+		// models. The runtime catalog that used to canonicalize these to
+		// `zai/...` is intentionally no longer registered locally, so migration
+		// must leave the user's persisted id untouched instead of resolving it
+		// against a non-existent catalog or replacing it with a default.
+		expect(
+			LlmsModels.getProviderCollectionSync("cline"),
+		).toBeUndefined();
 
 		const tempDir = mkdtempSync(
 			path.join(os.tmpdir(), "core-legacy-provider-"),
@@ -637,7 +675,7 @@ describe("migrateLegacyProviderSettings", () => {
 				{
 					mode: "act",
 					actModeApiProvider: "cline",
-					actModeClineModelId: aliasModelId,
+					actModeClineModelId: "z-ai/glm-5.2",
 				},
 				null,
 				2,
@@ -648,12 +686,23 @@ describe("migrateLegacyProviderSettings", () => {
 			JSON.stringify({ clineApiKey: "legacy-cline-key" }, null, 2),
 		);
 
-		migrateLegacyProviderSettings({
+		const result = migrateLegacyProviderSettings({
 			providerSettingsManager: manager,
 			dataDir: tempDir,
 		});
 
-		expect(manager.getProviderSettings("cline")?.model).toBe(canonicalModelId);
+		expect(result).toMatchObject({
+			migrated: true,
+			providerCount: 1,
+			lastUsedProvider: "cline",
+		});
+		expect(manager.getProviderSettings("cline")).toEqual({
+			provider: "cline",
+			model: "z-ai/glm-5.2",
+			apiKey: "legacy-cline-key",
+		});
+		expect(manager.getProviderSettings("cline")?.model).toBe("z-ai/glm-5.2");
+		expect(manager.read().providers.cline?.tokenSource).toBe("migration");
 	});
 
 	it("migrates legacy OpenAI-compatible config into the openai-compatible provider", () => {
@@ -907,7 +956,7 @@ describe("migrateLegacyProviderSettings", () => {
 				{
 					mode: "act",
 					actModeApiProvider: "bedrock",
-					actModeApiModelId: "global.anthropic.claude-opus-4-6-v1",
+					actModeApiModelId: TEST_BEDROCK_MODEL_ID,
 					awsRegion: "us-east-1",
 					awsAuthentication: "profile",
 					awsProfile: "bedrock",
@@ -1294,7 +1343,7 @@ describe("migrateLegacyProviderSettings", () => {
 				{
 					mode: "act",
 					actModeApiProvider: "sapaicore",
-					actModeApiModelId: "anthropic--claude-4.6-sonnet",
+					actModeApiModelId: TEST_SAP_AI_CORE_MODEL_ID,
 					sapAiCoreBaseUrl: "https://api.ai.example.aws.ml.hana.ondemand.com",
 					sapAiCoreTokenUrl:
 						"https://example.authentication.sap.hana.ondemand.com",

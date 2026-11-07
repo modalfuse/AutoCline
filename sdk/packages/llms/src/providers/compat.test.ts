@@ -5,7 +5,6 @@ import {
 	createGatewayApiHandlerAsync,
 	toGatewayRequestMessages,
 } from "./compat";
-import { ClineNotSubscribedError } from "./errors";
 import { DEFAULT_GATEWAY_MAX_OUTPUT_FRACTION } from "./gateway";
 import type { Message } from "./types";
 
@@ -666,50 +665,6 @@ describe("createGatewayApiHandler.createMessage", () => {
 			"https://example.openai.azure.com/openai/v1/chat/completions",
 			{ method: "POST" },
 		);
-	});
-
-	it("throws ClineNotSubscribedError for ClinePass required-plan 403 responses", async () => {
-		streamTextSpy.mockReturnValue({
-			fullStream: (async function* () {
-				yield { type: "finish", finishReason: "stop" };
-			})(),
-			usage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }),
-		});
-		const providerFetch = vi.fn(
-			async () =>
-				new Response(
-					JSON.stringify({
-						error: {
-							message: "the user is not subscribed to required model plan",
-						},
-					}),
-					{ status: 403 },
-				),
-		) as unknown as typeof fetch;
-
-		const handler = createGatewayApiHandler({
-			providerId: "cline-pass",
-			clientType: "openai-compatible",
-			modelId: "premium-model",
-			apiKey: "test-key",
-			fetch: providerFetch,
-		});
-
-		for await (const _chunk of handler.createMessage("", [
-			{ role: "user", content: "Hello" },
-		])) {
-			// Drain the stream so the provider is constructed.
-		}
-
-		const factoryConfig = openaiCompatibleFactorySpy.mock.calls.at(-1)?.[0] as
-			| { fetch?: typeof fetch }
-			| undefined;
-
-		await expect(
-			factoryConfig?.fetch?.("https://api.cline.bot/api/v1/chat/completions", {
-				method: "POST",
-			}),
-		).rejects.toBeInstanceOf(ClineNotSubscribedError);
 	});
 });
 

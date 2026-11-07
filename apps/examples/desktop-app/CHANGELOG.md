@@ -1,5 +1,11 @@
 # Cline Desktop Changelog
 
+## 1.1.0
+
+- This build is the AutoCline local fork of Cline Desktop, with AutoCline branding throughout the app instead of the upstream Cline product name
+- The app builds against an isolated local Hub and the `autocline-cli` entrypoint, so it runs against the fork's own backend services and CLI rather than the stock Cline ones
+- The stock "Sign in with Cline" first-run onboarding is bypassed by default; onboarding can still be replayed from Settings
+
 ## 0.0.49
 
 - A new **Changes** button in the session header shows the session's line counts and opens a pane listing the files changed in the last turn or across the whole session, with a diff of each. When a turn finishes, a summary under it lists the files it changed; click it to open the pane on that turn

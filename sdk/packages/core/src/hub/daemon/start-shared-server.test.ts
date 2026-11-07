@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	DEFAULT_HUB_HOST,
+	DEFAULT_HUB_PATHNAME,
+	DEFAULT_HUB_PORT,
+} from "../discovery/defaults";
 import type { EnsureHubServerOptions } from "./start-shared-server";
 
 const {
@@ -33,13 +38,26 @@ const {
 	mockStartHubWebSocketServer: vi.fn(),
 }));
 
-vi.mock("@cline/shared", () => ({
-	resolveClineBuildEnv: mockResolveClineBuildEnv,
-}));
+// Partial mock: the real `discovery/defaults.ts` reads CLINE_HUB_PORT /
+// DEV_PORT straight from `@cline/shared`, so only the build-env probe is
+// replaced and every other real export is preserved.
+vi.mock("@cline/shared", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@cline/shared")>();
+	return {
+		...actual,
+		resolveClineBuildEnv: mockResolveClineBuildEnv,
+	};
+});
 
-vi.mock("../discovery/defaults", () => ({
-	resolveHubEndpointOptions: mockResolveHubEndpointOptions,
-}));
+// Partial mock: `hub-config.ts` reads DEFAULT_HUB_HOST/PATHNAME from the real
+// module for its loopback fallback, so only the endpoint resolver is replaced.
+vi.mock("../discovery/defaults", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../discovery/defaults")>();
+	return {
+		...actual,
+		resolveHubEndpointOptions: mockResolveHubEndpointOptions,
+	};
+});
 
 vi.mock("../discovery/workspace", () => ({
 	resolveProductionHubOwnerContext: mockResolveProductionHubOwnerContext,
@@ -79,11 +97,21 @@ describe("ensureHubServer", () => {
 
 		expect(mockEnsureHubWebSocketServer).toHaveBeenCalledWith(
 			expect.objectContaining({
-				port: 25463,
 				allowPortFallback: false,
 				owner: expect.objectContaining({
 					discoveryPath: "/tmp/cline-data/locks/hub/production.json",
 				}),
+			}),
+		);
+		// The listen-config fallback (no ~/.config/cline/hub.json) must not
+		// widen the endpoint: the real loopback host/pathname defaults and the
+		// resolved port survive into the listener options.
+		expect(mockEnsureHubWebSocketServer).toHaveBeenCalledWith(
+			expect.objectContaining({
+				host: DEFAULT_HUB_HOST,
+				port: DEFAULT_HUB_PORT,
+				pathname: DEFAULT_HUB_PATHNAME,
+				listenHosts: [DEFAULT_HUB_HOST],
 			}),
 		);
 	});
@@ -97,11 +125,18 @@ describe("ensureHubServer", () => {
 
 		expect(mockEnsureHubWebSocketServer).toHaveBeenCalledWith(
 			expect.objectContaining({
-				port: 25463,
 				allowPortFallback: true,
 				owner: expect.objectContaining({
 					discoveryPath: "/tmp/cline-data/locks/hub/owners/shared.json",
 				}),
+			}),
+		);
+		expect(mockEnsureHubWebSocketServer).toHaveBeenCalledWith(
+			expect.objectContaining({
+				host: DEFAULT_HUB_HOST,
+				port: DEFAULT_HUB_PORT,
+				pathname: DEFAULT_HUB_PATHNAME,
+				listenHosts: [DEFAULT_HUB_HOST],
 			}),
 		);
 	});

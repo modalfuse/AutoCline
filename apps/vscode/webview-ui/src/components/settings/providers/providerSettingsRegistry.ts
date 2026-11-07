@@ -12,8 +12,6 @@ const CUSTOM_PROVIDER_SETTINGS_IDS = new Set([
 	"asksage",
 	"bedrock",
 	"claude-code",
-	"cline",
-	"cline-pass",
 	"dify",
 	"hicap",
 	"litellm",

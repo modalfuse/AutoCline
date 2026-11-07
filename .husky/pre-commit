@@ -1,3 +1,6 @@
+#!/usr/bin/env sh
+set -e
+
 if ! command -v gitleaks >/dev/null 2>&1; then
 	echo "gitleaks is required for the pre-commit secret scan."
 	echo "Install it with: brew install gitleaks"
@@ -5,7 +8,10 @@ if ! command -v gitleaks >/dev/null 2>&1; then
 	exit 1
 fi
 
-gitleaks git --pre-commit --redact --staged --verbose || exit 1
+gitleaks git --pre-commit --redact --staged --verbose
 
-cd apps/vscode && bunx lint-staged
+# Read-only staged checks: Biome in check-only mode plus a generated-proto
+# freshness check. The hook never rewrites staged files, never re-stages
+# anything, and never touches the git index -- see scripts/check-staged.mjs.
+cd apps/vscode && node scripts/check-staged.mjs
 

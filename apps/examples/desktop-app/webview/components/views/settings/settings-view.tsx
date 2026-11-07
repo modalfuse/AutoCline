@@ -20,15 +20,6 @@ import {
 	setStoredAppFontSize,
 	subscribeToAppFontSize,
 } from "@/lib/app-font-size";
-import {
-	APP_ICONS,
-	type AppIconId,
-	appIconAssetPath,
-	appIconSurface,
-	DEFAULT_APP_ICON,
-	readStoredAppIcon,
-	setStoredAppIcon,
-} from "@/lib/app-icon";
 import { desktopClient } from "@/lib/desktop-client";
 import { readModelSelectionStorageFromWindow } from "@/lib/model-selection";
 import { resetOnboarding } from "@/lib/onboarding";
@@ -65,7 +56,8 @@ import {
 } from "../marketplace-explorer-view";
 import { PageFrame, PageHeader } from "../page-layout";
 import { AboutContent } from "./about-view";
-import { AccountView } from "./account-view";
+// AutoCline: AccountView removed (Cline credits/billing not applicable)
+// import { AccountView } from "./account-view";
 import { AddProviderContent, type AddProviderPayload } from "./add-provider";
 import { ChannelsContent } from "./channels-view";
 import { CustomizeView } from "./customize-view";
@@ -159,7 +151,10 @@ export function SettingsView({
 	const [detailResetToken, setDetailResetToken] = useState(0);
 
 	useEffect(() => {
-		if (section !== "Providers") {
+		// Keep provider selection and add dialog state when navigating between
+		// Keys and Providers (they share the same content), but clear it when
+		// leaving to other sections.
+		if (section !== "Keys" && section !== "Providers") {
 			setSelectedProviderId(null);
 			setAddingProvider(false);
 		}
@@ -225,7 +220,8 @@ export function SettingsView({
 	}, [setProvidersWithCache]);
 
 	useEffect(() => {
-		if (activeNav !== "Providers") {
+		// Both "Keys" and "Providers" pages need the provider catalog loaded.
+		if (activeNav !== "Keys" && activeNav !== "Providers") {
 			return;
 		}
 		const timeoutId = window.setTimeout(() => {
@@ -629,7 +625,12 @@ export function SettingsView({
 	);
 
 	const content =
-		activeNav === "Providers" ? (
+		activeNav === "Keys" ? (
+			<>
+				{providerContent}
+				{addProviderDialog}
+			</>
+		) : activeNav === "Providers" ? (
 			<>
 				{providerContent}
 				{addProviderDialog}
@@ -660,8 +661,6 @@ export function SettingsView({
 			<ImportContent />
 		) : activeNav === "Remote" ? (
 			<RemoteEnvironmentsContent />
-		) : activeNav === "Account" ? (
-			<AccountView />
 		) : activeNav === "About" ? (
 			<AboutContent onOpenConnectors={() => onNavigateSection("Customize")} />
 		) : activeNav === "General" ? (
@@ -710,15 +709,6 @@ function GeneralSettingsContent() {
 		if (typeof window === "undefined") return DEFAULT_APP_FONT_SIZE;
 		return readStoredAppFontSize();
 	});
-	const [appIcon, setAppIcon] = useState<AppIconId>(() => {
-		if (typeof window === "undefined") return DEFAULT_APP_ICON;
-		return readStoredAppIcon();
-	});
-	const [appIconLocation, setAppIconLocation] = useState<
-		"Dock" | "Taskbar" | "desktop"
-	>("desktop");
-	const [appIconError, setAppIconError] = useState<string | null>(null);
-	const appIconRequestRef = useRef(0);
 	const [telemetryOptOut, setTelemetryOptOut] = useState(false);
 	const [telemetryLoading, setTelemetryLoading] = useState(true);
 	const [telemetrySaving, setTelemetrySaving] = useState(false);
@@ -728,7 +718,6 @@ function GeneralSettingsContent() {
 	const [autoUpdateSaving, setAutoUpdateSaving] = useState(false);
 	const [autoUpdateError, setAutoUpdateError] = useState<string | null>(null);
 
-	useEffect(() => setAppIconLocation(appIconSurface(navigator.userAgent)), []);
 	useEffect(() => subscribeToAppFontSize(setFontSize), []);
 
 	const loadGlobalSettings = useCallback(async () => {
@@ -816,24 +805,6 @@ function GeneralSettingsContent() {
 
 	const updateFontSize = ([nextFontSize]: number[]) => {
 		updateFontSizePreference(nextFontSize);
-	};
-
-	const updateAppIcon = async (nextIcon: AppIconId) => {
-		const requestId = ++appIconRequestRef.current;
-		const previousIcon = appIcon;
-		setAppIcon(nextIcon);
-		setAppIconError(null);
-		try {
-			await setStoredAppIcon(nextIcon);
-		} catch (error) {
-			// A newer selection supersedes this request; rolling back now
-			// would clobber it.
-			if (appIconRequestRef.current !== requestId) {
-				return;
-			}
-			setAppIcon(previousIcon);
-			setAppIconError(error instanceof Error ? error.message : String(error));
-		}
 	};
 
 	// resetOnboarding dispatches ONBOARDING_RESET_EVENT, which the app shell
@@ -935,54 +906,6 @@ function GeneralSettingsContent() {
 								title={option.label}
 								type="button"
 							/>
-						))}
-					</div>
-				</div>
-				<div className="flex items-center justify-between gap-5 border-b py-4 max-[720px]:flex-col max-[720px]:items-stretch">
-					<div className="flex flex-col gap-1">
-						<p className="text-base font-semibold text-foreground">App icon</p>
-						<p className="text-sm text-muted-foreground">
-							Pick the icon Cline shows in the {appIconLocation}.
-						</p>
-						{appIconError ? (
-							<p className="mt-2 text-xs text-destructive" role="alert">
-								Failed to change app icon: {appIconError}
-							</p>
-						) : null}
-					</div>
-					<div className="flex shrink-0 items-start gap-2.5">
-						{APP_ICONS.map((icon) => (
-							<button
-								aria-label={icon.label}
-								aria-pressed={appIcon === icon.id}
-								className="group flex flex-col items-center gap-2"
-								key={icon.id}
-								onClick={() => void updateAppIcon(icon.id)}
-								type="button"
-							>
-								<img
-									alt=""
-									className={cn(
-										"size-14 rounded-2xl transition-transform group-hover:scale-105",
-										appIcon === icon.id &&
-											"ring-2 ring-ring ring-offset-2 ring-offset-background",
-									)}
-									draggable={false}
-									height={112}
-									src={appIconAssetPath(icon.id)}
-									width={112}
-								/>
-								<span
-									className={cn(
-										"text-xs",
-										appIcon === icon.id
-											? "font-medium text-foreground"
-											: "text-muted-foreground",
-									)}
-								>
-									{icon.label}
-								</span>
-							</button>
 						))}
 					</div>
 				</div>

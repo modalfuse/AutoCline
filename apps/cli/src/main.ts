@@ -938,9 +938,7 @@ export async function runCli(): Promise<void> {
 		}
 		refreshCliFeatureFlagsInBackground();
 		const lastUsedProviderSettings =
-			providerSettingsManager.getLastUsedProviderSettings({
-				isClinePassEnabled: true,
-			});
+			providerSettingsManager.getLastUsedProviderSettings();
 		const provider = normalizeProviderId(
 			args.provider?.trim() || lastUsedProviderSettings?.provider || "cline",
 		);
@@ -1066,7 +1064,6 @@ export async function runCli(): Promise<void> {
 			systemPrompt: await resolveSystemPrompt({
 				cwd,
 				explicitSystemPrompt: args.systemPrompt,
-				providerId: provider,
 				mode: effectiveMode,
 			}),
 			execution: {
@@ -1198,9 +1195,7 @@ export async function runCli(): Promise<void> {
 			) {
 				const { getClineCliMigrationNotice, markClineCliMigrationNoticeShown } =
 					await import("./kanban-migration/notice");
-				initialNotice = getClineCliMigrationNotice(undefined, process.env, {
-					activeProviderId: provider,
-				});
+				initialNotice = getClineCliMigrationNotice(undefined, process.env);
 				if (initialNotice) {
 					markInitialNoticeShown = (notice) => {
 						markClineCliMigrationNoticeShown(undefined, notice.id);

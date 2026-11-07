@@ -335,9 +335,11 @@ describe("plugin-config-loader", () => {
 		const workspace = await mkdtemp(
 			join(tmpdir(), "core-plugin-config-loader-workspace-"),
 		);
+		const originalClineDir = process.env.CLINE_DIR;
 		try {
 			process.env.HOME = home;
 			setHomeDir(home);
+			process.env.CLINE_DIR = join(home, ".cline");
 			const workspacePlugins = join(workspace, ".cline", "plugins");
 			const userPlugins = join(home, ".cline", "plugins");
 			const documentsPlugins = join(home, "Documents", "Cline", "Plugins");
@@ -362,6 +364,11 @@ describe("plugin-config-loader", () => {
 			expect(resolved).toContain(userPlugin);
 			expect(resolved).toContain(documentsPlugin);
 		} finally {
+			if (originalClineDir === undefined) {
+				delete process.env.CLINE_DIR;
+			} else {
+				process.env.CLINE_DIR = originalClineDir;
+			}
 			await rm(home, { recursive: true, force: true });
 			await rm(workspace, { recursive: true, force: true });
 		}

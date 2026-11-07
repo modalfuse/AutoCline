@@ -18,7 +18,7 @@ import {
 	type RemoteEnvironmentDependencies,
 	RemoteEnvironmentService,
 	type RemoteEnvironmentServiceOptions,
-	type RemoteTunnelProcess,
+	resolveRemoteHubUrls,
 	runRemoteProcess,
 } from "./remote-environments";
 
@@ -26,17 +26,6 @@ vi.mock("node:child_process", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:child_process")>();
 	return { ...actual, spawn: vi.fn(actual.spawn) };
 });
-
-class FakeTunnel extends EventEmitter implements RemoteTunnelProcess {
-	public readonly pid = 4242;
-	public exitCode: number | null = null;
-	public killed = false;
-
-	public kill(): boolean {
-		this.killed = true;
-		return true;
-	}
-}
 
 interface Invocation {
 	executable: string;
@@ -58,6 +47,8 @@ function inspection(
 		`${prefix}\0CLINE_REMOTE_INSPECT_V1\0${platform}\0${arch}\0${home}\0`,
 	);
 }
+
+const PROFILE_HUB_URLS = ["ws://100.101.163.69:25463/hub"];
 
 describe("RemoteEnvironmentService", () => {
 	let testDirectory: string;
@@ -87,12 +78,14 @@ describe("RemoteEnvironmentService", () => {
 	): RemoteEnvironmentService {
 		let id = 0;
 		return new RemoteEnvironmentService({
+			env: {},
 			...options,
 			profilesPath,
 			dependencies: {
 				now: () => new Date("2026-08-06T12:00:00.000Z"),
 				randomId: () => `test-id-${++id}`,
 				requestHubShutdown: async () => true,
+				verifyHubConnection: async () => true,
 				...overrides,
 			},
 		});
@@ -226,84 +219,59 @@ describe("RemoteEnvironmentService", () => {
 		).rejects.toThrow("exited before the upload completed");
 	});
 
-	it.each([
-		"connect",
-		"delete",
-	])("recovers lost-Hub cleanup with a deleted helper before %s", async (action) => {
+	it("does not shut down or enqueue cleanup for a shared Hub on dispose", async () => {
 		const commands: string[] = [];
-		const tunnels: FakeTunnel[] = [];
 		let offline = false;
-		let requiredIdentity: string | undefined;
-		let helperMissing = false;
-		let uploads = 0;
+		let shutdowns = 0;
 		const dependencies: Partial<RemoteEnvironmentDependencies> = {
-			runProcess: async (_executable, args, options) => {
+			runProcess: async (_executable, args) => {
 				const command = args.at(-1) ?? "";
 				commands.push(command);
 				if (offline) throw new Error("Network unavailable");
-				if (options.inputFile) {
-					uploads += 1;
-					helperMissing = false;
-				}
-				if (helperMissing && command.includes("'test' '-x'"))
-					return { stdout: "", stderr: "", exitCode: 1 };
-				if (helperMissing && command.includes("'hub' 'stop'"))
-					throw new Error("Helper missing");
-				if (requiredIdentity && !args.includes(requiredIdentity)) {
-					throw new Error("Obsolete SSH identity");
-				}
 				if (command.includes("uname -s"))
 					return inspection("Linux", "x86_64", "/home/dev");
-				if (command.includes("'hub' 'ensure'"))
+				if (command.includes("python3") && command.includes("-c"))
 					return success(
-						'{"url":"ws://127.0.0.1:25463/hub","authToken":"token"}',
+						'{"url":"ws://127.0.0.1:25463/hub","authToken":"token","port":25463,"pathname":"/hub"}',
 					);
 				return success();
 			},
 			resolveHelperBinary: async () => "/helper",
 			fileReadable: async () => true,
 			hashFile: async () => "0123456789abcdef",
-			reservePort: async () => 41000 + tunnels.length,
-			spawnTunnel: () => {
-				const tunnel = new FakeTunnel();
-				tunnels.push(tunnel);
-				return tunnel;
+			verifyHubConnection: async () => !offline,
+			requestHubShutdown: async () => {
+				shutdowns += 1;
+				if (offline) throw new Error("Network unavailable");
+				return true;
 			},
-			waitForTunnel: async () => undefined,
 		};
 		const service = createService(dependencies);
-		const first = await service.upsert({ name: "First", host: "same-account" });
+		const first = await service.upsert({
+			name: "First",
+			host: "same-account",
+			hubUrls: PROFILE_HUB_URLS,
+		});
 		const second = await service.upsert({
 			name: "Second",
 			host: "same-account",
+			hubUrls: PROFILE_HUB_URLS,
 		});
 		await service.connect(first.id);
 		await service.connect(second.id);
-		const ensures = commands.filter((command) =>
-			command.includes("'hub' 'ensure'"),
+		const lookups = commands.filter(
+			(command) => command.includes("python3") && command.includes("-c"),
 		);
-		expect(ensures).toHaveLength(2);
-		expect(ensures[0]).not.toBe(ensures[1]);
+		expect(lookups).toHaveLength(2);
+		// Shared-hub lookup depends only on hubUrls, so both connects reuse the
+		// same discovery query (unlike private port-0 hubs with unique paths).
+		expect(lookups[0]).toBe(lookups[1]);
 		offline = true;
-		tunnels[0].emit("exit", 255, null);
-		await expect(service.dispose()).rejects.toThrow("Network unavailable");
-		expect(await readdir(`${profilesPath}.cleanup`)).toHaveLength(1);
-		offline = false;
-		const restarted = createService(dependencies);
-		requiredIdentity = "/keys/rotated";
-		helperMissing = true;
-		await restarted.upsert({ ...first, identityFile: requiredIdentity });
-		if (action === "connect") await restarted.connect(first.id);
-		else expect(await restarted.delete(first.id)).toBe(true);
-		expect(uploads).toBe(1);
-		await restarted.dispose();
-		expect(await readdir(`${profilesPath}.cleanup`)).toEqual([]);
-		const stop = commands
-			.filter((command) => command.includes("'hub' 'stop'"))
-			.at(-1);
-		expect(stop?.split("'--discovery-path' ")[1]).toBe(
-			ensures[0]?.split("'--discovery-path' ")[1],
-		);
+		await expect(service.dispose()).resolves.toBeUndefined();
+		expect(shutdowns).toBe(0);
+		expect(
+			await readdir(`${profilesPath}.cleanup`).catch(() => []),
+		).toEqual([]);
 	});
 
 	it("stops a Hub recorded by an earlier dedicated helper with its own flag", async () => {
@@ -406,7 +374,8 @@ describe("RemoteEnvironmentService", () => {
 			remoteArch: "x64",
 			remoteHome: "/home/alice",
 		});
-		expect(invocations).toHaveLength(1);
+		// inspect (uname) + validateDirectory (test -d $HOME)
+		expect(invocations).toHaveLength(2);
 		expect(invocations[0]?.executable).toBe("ssh");
 		expect(invocations[0]?.args).toEqual(
 			expect.arrayContaining([
@@ -423,6 +392,7 @@ describe("RemoteEnvironmentService", () => {
 			]),
 		);
 		expect(invocations[0]?.args.at(-1)).toContain("uname -s");
+		expect(invocations[1]?.args.at(-1)).toContain("test");
 	});
 
 	it("leaves the SSH port unset so an OpenSSH config alias can choose it", async () => {
@@ -466,15 +436,10 @@ describe("RemoteEnvironmentService", () => {
 		});
 	});
 
-	it("bootstraps the exact helper and creates a loopback-only SSH tunnel", async () => {
+	it("connects directly to the configured Hub URL with the remote helper's token", async () => {
 		const invocations: Invocation[] = [];
-		const tunnel = new FakeTunnel();
-		const spawnTunnel = vi.fn(() => tunnel);
-		const waitForTunnel = vi.fn(async () => undefined);
-		const requestHubShutdown = vi.fn(async () => {
-			expect(tunnel.killed).toBe(false);
-			return true;
-		});
+		const verifyHubConnection = vi.fn(async () => true);
+		const requestHubShutdown = vi.fn(async () => true);
 		const service = createService({
 			runProcess: async (executable, args, options) => {
 				invocations.push({ executable, args, options });
@@ -483,11 +448,20 @@ describe("RemoteEnvironmentService", () => {
 					return inspection("Linux", "aarch64", "/home/dev");
 				}
 				if (command.includes("'test' '-x'")) {
+					// Exact content-addressed path is missing; reuse another helper.
 					return { stdout: "", stderr: "", exitCode: 1 };
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (
+					command.includes("ls -1t") &&
+					command.includes(".cline/remote")
+				) {
 					return success(
-						'{"url":"ws://127.0.0.1:25463/hub","authToken":"remote-secret"}\n',
+						"/home/dev/.cline/remote/cline-linux-arm64-deadbeefdeadbeef\n",
+					);
+				}
+				if (command.includes("python3") && command.includes("-c")) {
+					return success(
+						'{"url":"ws://127.0.0.1:25463/hub","port":25463,"pathname":"/hub","authToken":"remote-secret"}\n',
 					);
 				}
 				return success();
@@ -501,14 +475,16 @@ describe("RemoteEnvironmentService", () => {
 			},
 			fileReadable: async () => true,
 			hashFile: async () => "abcdef0123456789fedcba9876543210",
-			reservePort: async () => 43117,
-			spawnTunnel,
-			waitForTunnel,
+			verifyHubConnection,
 			requestHubShutdown,
 		});
 		const profile = await service.upsert({
 			name: "ARM builder",
 			host: "arm-builder",
+			hubUrls: [
+				"ws://100.101.163.69:25463/hub",
+				"ws://hp02.internal:25463/hub",
+			],
 		});
 
 		const [connection, concurrentConnection] = await Promise.all([
@@ -516,87 +492,71 @@ describe("RemoteEnvironmentService", () => {
 			service.connect(profile.id),
 		]);
 		expect(concurrentConnection).toEqual(connection);
-		expect(spawnTunnel).toHaveBeenCalledTimes(1);
 		expect(connection).toMatchObject({
 			profile,
 			profileId: profile.id,
 			state: "connected",
-			endpoint: "ws://127.0.0.1:43117/hub",
+			// The configured URL is dialed as-is: no local forward, no random port.
+			endpoint: "ws://100.101.163.69:25463/hub",
 			authToken: "remote-secret",
 			workspaceRoot: "/home/dev",
 			homeDir: "/home/dev",
 			platform: "linux",
 			arch: "arm64",
 			remoteHubUrl: "ws://127.0.0.1:25463/hub",
-			localPort: 43117,
+			localPort: 25463,
 		});
 		expect(service.getActive()).toEqual(connection);
 		expect(service.getConnection(profile.id)).toEqual(connection);
-
-		const upload = invocations.find(
-			(invocation) => invocation.options.inputFile,
-		);
-		expect(upload).toMatchObject({
-			executable: "ssh",
-			options: { inputFile: "/opt/cline/code-sidecar-linux-arm64" },
-		});
-		expect(upload?.args.at(-1)).toContain("umask 077; cat >");
-		expect(upload?.args).toContain("ClearAllForwardings=yes");
-		const ensure = invocations.find((invocation) =>
-			invocation.args.at(-1)?.includes("'hub' 'ensure'"),
-		);
-		expect(ensure?.args.at(-1)).toContain("'/home/dev'");
-		expect(ensure?.args.at(-1)).toMatch(
-			/\/home\/dev\/\.cline\/data\/remote\/[a-f0-9-]+\.json/,
-		);
-		expect(ensure?.args.at(-1)).toContain(
-			"exec 'env' 'CLINE_NO_AUTO_UPDATE=1' 'CLINE_HUB_LAUNCHER_CLIENT=cline' 'CLINE_HUB_LAUNCHER_TRANSPORT=ssh' '/home/dev/.cline/remote/cline-linux-arm64-abcdef0123456789' 'hub' 'ensure' '--json' '--allow-port-fallback' '--no-connectors' '--login-shell-path' '--cwd' '/home/dev' '--host' '127.0.0.1' '--port' '0' '--pathname' '/hub' '--discovery-path' ",
-		);
-		expect(spawnTunnel).toHaveBeenCalledWith(
-			"ssh",
-			expect.arrayContaining([
-				"-N",
-				"-L",
-				"127.0.0.1:43117:127.0.0.1:25463",
-				"arm-builder",
-			]),
-		);
-		expect(spawnTunnel).not.toHaveBeenCalledWith(
-			"ssh",
-			expect.arrayContaining(["ClearAllForwardings=yes"]),
-		);
-		expect(spawnTunnel).not.toHaveBeenCalledWith(
-			"ssh",
-			expect.arrayContaining(["ExitOnForwardFailure=yes"]),
-		);
-		expect(waitForTunnel).toHaveBeenCalledWith(43117, tunnel, 40_000);
-
-		await expect(service.disconnect()).resolves.toBe(true);
-		expect(requestHubShutdown).toHaveBeenCalledWith(
-			"ws://127.0.0.1:43117/hub",
+		expect(verifyHubConnection).toHaveBeenCalledWith(
+			"ws://100.101.163.69:25463/hub",
 			"remote-secret",
 		);
-		expect(tunnel.killed).toBe(true);
+
+		// hubUrls mode never uploads or links a helper — only inspect + auth lookup.
+		expect(
+			invocations.some((invocation) => invocation.options.inputFile),
+		).toBe(false);
+		expect(
+			invocations.some((invocation) =>
+				(invocation.args.at(-1) ?? "").includes("umask 077; cat >"),
+			),
+		).toBe(false);
+		expect(
+			invocations.some((invocation) =>
+				(invocation.args.at(-1) ?? "").includes("'ln' '-sfn'"),
+			),
+		).toBe(false);
+		expect(
+			invocations.some((invocation) =>
+				invocation.args.includes("ClearAllForwardings=yes"),
+			),
+		).toBe(true);
+		const lookup = invocations.find((invocation) =>
+			invocation.args.at(-1)?.includes("python3"),
+		);
+		expect(lookup?.args.at(-1)).toContain("'/home/dev'");
+		expect(lookup?.args.at(-1)).toContain("ws://100.101.163.69:25463/hub");
+		// Every SSH invocation is a one-shot command; nothing holds a forward open.
+		for (const invocation of invocations) {
+			expect(invocation.args).not.toContain("-L");
+			expect(invocation.args).not.toContain("-N");
+		}
+
+		await expect(service.disconnect()).resolves.toBe(true);
+		expect(requestHubShutdown).not.toHaveBeenCalled();
 		expect(service.getActive()).toBeUndefined();
 	});
 
-	it.each([
-		"reserve",
-		"spawn",
-		"ready",
-	])("cleans up the owned remote Hub when %s fails", async (stage) => {
+	it("refuses to connect a profile with no hubUrls instead of tunnelling", async () => {
 		const commands: string[] = [];
-		const tunnel = new FakeTunnel();
-		const fail = () => {
-			throw new Error("tunnel setup failed");
-		};
 		const service = createService({
 			runProcess: async (_executable, args) => {
 				const command = args.at(-1) ?? "";
 				commands.push(command);
 				if (command.includes("uname -s"))
 					return inspection("Linux", "aarch64", "/home/dev");
-				if (command.includes("'hub' 'ensure'"))
+				if (command.includes("python3") && command.includes("-c"))
 					return success(
 						'{"url":"ws://127.0.0.1:25463/hub","authToken":"secret"}',
 					);
@@ -605,30 +565,58 @@ describe("RemoteEnvironmentService", () => {
 			resolveHelperBinary: async () => "/helper",
 			fileReadable: async () => true,
 			hashFile: async () => "abcdef0123456789fedcba9876543210",
-			reservePort: async () => (stage === "reserve" ? fail() : 43117),
-			spawnTunnel: () => (stage === "spawn" ? fail() : tunnel),
-			waitForTunnel: async () => {
-				if (stage === "ready") fail();
-			},
+			verifyHubConnection: async () => true,
 		});
 		const profile = await service.upsert({ name: "Remote", host: "remote" });
-		await expect(service.connect(profile.id)).rejects.toThrow(
-			"tunnel setup failed",
-		);
-		const ensure = commands.find((command) =>
-			command.includes("'hub' 'ensure'"),
-		);
-		const stop = commands.find((command) => command.includes("'hub' 'stop'"));
-		expect(stop).toBeDefined();
-		expect(stop?.split("'--discovery-path' ")[1]).toBe(
-			ensure?.split("'--discovery-path' ")[1],
-		);
-		expect(tunnel.killed).toBe(stage === "ready");
+		await expect(service.connect(profile.id)).rejects.toThrow(/has no hubUrls/);
 		expect(service.getConnection(profile.id)).toBeUndefined();
+		// Direct mode never starts a private Hub, so a refused profile leaves none
+		// to stop.
+		expect(
+			commands.some(
+				(command) => command.includes("python3") && command.includes("-c"),
+			),
+		).toBe(false);
+		expect(commands.some((command) => command.includes("'hub' 'stop'"))).toBe(
+			false,
+		);
 	});
 
-	it("bounds Hub shutdown before closing the SSH tunnel", async () => {
-		const tunnel = new FakeTunnel();
+	it("fails with every tried URL when the configured Hub does not answer", async () => {
+		const commands: string[] = [];
+		const service = createService({
+			runProcess: async (_executable, args) => {
+				const command = args.at(-1) ?? "";
+				commands.push(command);
+				if (command.includes("uname -s"))
+					return inspection("Linux", "aarch64", "/home/dev");
+				if (command.includes("python3") && command.includes("-c"))
+					return success(
+						'{"url":"ws://127.0.0.1:25463/hub","authToken":"secret"}',
+					);
+				return success();
+			},
+			resolveHelperBinary: async () => "/helper",
+			fileReadable: async () => true,
+			hashFile: async () => "abcdef0123456789fedcba9876543210",
+			verifyHubConnection: async () => false,
+		});
+		const profile = await service.upsert({
+			name: "Remote",
+			host: "remote",
+			hubUrls: ["ws://100.101.163.69:25463/hub", "ws://other:25463/hub"],
+		});
+		await expect(service.connect(profile.id)).rejects.toThrow(
+			/ws:\/\/100\.101\.163\.69:25463\/hub \(also configured: ws:\/\/other:25463\/hub\)/,
+		);
+		expect(service.getConnection(profile.id)).toBeUndefined();
+		// Shared-Hub lookup does not start a private Hub, so nothing to stop.
+		expect(commands.some((command) => command.includes("'hub' 'stop'"))).toBe(
+			false,
+		);
+	});
+
+	it("bounds Hub shutdown on disconnect", async () => {
 		const requestHubShutdown = vi.fn(
 			async () => await new Promise<boolean>(() => undefined),
 		);
@@ -639,9 +627,9 @@ describe("RemoteEnvironmentService", () => {
 					if (command.includes("uname -s")) {
 						return inspection("Linux", "aarch64", "/home/pi");
 					}
-					if (command.includes("'hub' 'ensure'")) {
+					if (command.includes("python3") && command.includes("-c")) {
 						return success(
-							'{"url":"ws://127.0.0.1:25463/hub","authToken":"token"}\n',
+							'{"url":"ws://127.0.0.1:25463/hub","port":25463,"pathname":"/hub","authToken":"token"}\n',
 						);
 					}
 					return success();
@@ -649,19 +637,20 @@ describe("RemoteEnvironmentService", () => {
 				resolveHelperBinary: async () => "/opt/cline/helper",
 				fileReadable: async () => true,
 				hashFile: async () => "0123456789abcdef",
-				reservePort: async () => 43_000,
-				spawnTunnel: () => tunnel,
-				waitForTunnel: async () => undefined,
+				verifyHubConnection: async () => true,
 				requestHubShutdown,
 			},
 			{ hubShutdownTimeoutMs: 5 },
 		);
-		const profile = await service.upsert({ name: "Pi", host: "pi" });
+		const profile = await service.upsert({
+			name: "Pi",
+			host: "pi",
+			hubUrls: PROFILE_HUB_URLS,
+		});
 		await service.connect(profile.id);
 
 		await expect(service.disconnect(profile.id)).resolves.toBe(true);
-		expect(requestHubShutdown).toHaveBeenCalledOnce();
-		expect(tunnel.killed).toBe(true);
+		expect(requestHubShutdown).not.toHaveBeenCalled();
 	});
 
 	it("reuses an already-installed content-addressed helper", async () => {
@@ -673,9 +662,9 @@ describe("RemoteEnvironmentService", () => {
 				if (command.includes("uname -s")) {
 					return inspection("Darwin", "arm64", "/Users/dev");
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (command.includes("python3") && command.includes("-c")) {
 					return success(
-						'{"url":"ws://localhost:29000/hub","authToken":"token"}\n',
+						'{"url":"ws://127.0.0.1:25463/hub","port":25463,"pathname":"/hub","authToken":"token"}\n',
 					);
 				}
 				return success();
@@ -683,13 +672,11 @@ describe("RemoteEnvironmentService", () => {
 			resolveHelperBinary: async () => "/Applications/Cline.app/sidecar",
 			fileReadable: async () => true,
 			hashFile: async () => "0123456789abcdef",
-			reservePort: async () => 40000,
-			spawnTunnel: () => new FakeTunnel(),
-			waitForTunnel: async () => undefined,
 		});
 		const profile = await service.upsert({
 			name: "Mac",
 			host: "mac",
+			hubUrls: PROFILE_HUB_URLS,
 		});
 		await service.connect(profile.id);
 
@@ -698,16 +685,94 @@ describe("RemoteEnvironmentService", () => {
 		);
 	});
 
+	it("reconnects via shared Hub credential cache without SSH", async () => {
+		const invocations: Invocation[] = [];
+		const verifyHubConnection = vi.fn(async () => true);
+		const service = createService({
+			runProcess: async (executable, args, options) => {
+				invocations.push({ executable, args, options });
+				const command = args.at(-1) ?? "";
+				if (command.includes("uname -s")) {
+					return inspection("Linux", "x86_64", "/home/dev");
+				}
+				if (command.includes("python3") && command.includes("-c")) {
+					return success(
+						'{"url":"ws://127.0.0.1:25463/hub","authToken":"token"}\n',
+					);
+				}
+				return success();
+			},
+			resolveHelperBinary: async () => "/opt/cline/helper",
+			fileReadable: async () => true,
+			hashFile: async () => "0149bbee2827d5f4ffffffffffffffff",
+			verifyHubConnection,
+		});
+		const profile = await service.upsert({
+			name: "hp02",
+			host: "hp02",
+			hubUrls: PROFILE_HUB_URLS,
+		});
+		await service.connect(profile.id);
+		const sshAfterFirst = invocations.length;
+		expect(sshAfterFirst).toBeGreaterThan(0);
+		await service.disconnect(profile.id);
+
+		invocations.length = 0;
+		await service.connect(profile.id);
+		expect(invocations).toHaveLength(0);
+		expect(verifyHubConnection).toHaveBeenCalledWith(
+			"ws://100.101.163.69:25463/hub",
+			"token",
+		);
+		expect(service.getConnection(profile.id)?.authToken).toBe("token");
+	});
+
+	it("errors when shared Hub discovery is missing without uploading a helper", async () => {
+		const invocations: Invocation[] = [];
+		const service = createService({
+			runProcess: async (executable, args, options) => {
+				invocations.push({ executable, args, options });
+				const command = args.at(-1) ?? "";
+				if (command.includes("uname -s")) {
+					return inspection("Linux", "x86_64", "/home/dev");
+				}
+				// Missing discovery record — python lookup fails.
+				if (command.includes("python3") && command.includes("-c")) {
+					return { stdout: "", stderr: "no hub discovery\n", exitCode: 1 };
+				}
+				return { stdout: "", stderr: "", exitCode: 1 };
+			},
+			resolveHelperBinary: async () => "/opt/cline/helper",
+			fileReadable: async () => true,
+			hashFile: async () => "0123456789abcdef",
+		});
+		const profile = await service.upsert({
+			name: "Empty",
+			host: "empty",
+			hubUrls: PROFILE_HUB_URLS,
+		});
+		await expect(service.connect(profile.id)).rejects.toThrow(
+			/Could not find a running Hub discovery record|Failed to run remote command python3/,
+		);
+		expect(invocations.some((invocation) => invocation.options.inputFile)).toBe(
+			false,
+		);
+		expect(
+			invocations.some((invocation) =>
+				(invocation.args.at(-1) ?? "").includes("umask 077; cat >"),
+			),
+		).toBe(false);
+	});
+
 	it("allows renaming but keeps a profile's SSH destination immutable", async () => {
-		const tunnel = new FakeTunnel();
-		const spawnTunnel = vi.fn(() => tunnel);
+		const hubs = vi.fn(async () => true);
 		const service = createService({
 			runProcess: async (_executable, args) => {
 				const command = args.at(-1) ?? "";
 				if (command.includes("uname -s")) {
 					return inspection("Linux", "aarch64", "/home/pi");
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (command.includes("python3") && command.includes("-c")) {
 					return success(
 						'{"url":"ws://127.0.0.1:25463/hub","authToken":"token"}\n',
 					);
@@ -717,15 +782,14 @@ describe("RemoteEnvironmentService", () => {
 			resolveHelperBinary: async () => "/opt/cline/helper",
 			fileReadable: async () => true,
 			hashFile: async () => "0123456789abcdef",
-			reservePort: async () => 42_000,
-			spawnTunnel,
-			waitForTunnel: async () => undefined,
+			verifyHubConnection: hubs,
 		});
 		const created = await service.upsert({
 			name: "Pi",
 			host: "pi-from-ssh-config",
 			user: "pi",
 			identityFile: "/keys/pi_ed25519",
+			hubUrls: PROFILE_HUB_URLS,
 		});
 		const first = await service.connect(created.id);
 
@@ -738,7 +802,8 @@ describe("RemoteEnvironmentService", () => {
 			localPort: first.localPort,
 			profile: renamed,
 		});
-		expect(spawnTunnel).toHaveBeenCalledTimes(1);
+		// The running connection is reused; the Hub is not probed again.
+		expect(hubs).toHaveBeenCalledTimes(1);
 
 		for (const destinationUpdate of [
 			{ host: "different-host" },
@@ -757,12 +822,10 @@ describe("RemoteEnvironmentService", () => {
 		).rejects.toThrow("Disconnect the remote environment");
 
 		expect(service.getConnection(created.id)).toMatchObject({
-			localPort: first.localPort,
+			endpoint: PROFILE_HUB_URLS[0],
 			profile: renamed,
 		});
 		expect(await service.list()).toEqual([renamed]);
-		expect(spawnTunnel).toHaveBeenCalledTimes(1);
-		expect(tunnel.killed).toBe(false);
 
 		await service.disconnect(created.id);
 		const updatedIdentity = await service.upsert({
@@ -772,33 +835,7 @@ describe("RemoteEnvironmentService", () => {
 		expect(await service.list()).toEqual([updatedIdentity]);
 	});
 
-	it("fails clearly when no helper exists for the remote target and never downloads one", async () => {
-		const invocations: Invocation[] = [];
-		const service = createService({
-			runProcess: async (executable, args, options) => {
-				invocations.push({ executable, args, options });
-				return args.at(-1)?.includes("uname -s")
-					? inspection("Linux", "aarch64", "/home/dev")
-					: success();
-			},
-			resolveHelperBinary: async () => undefined,
-		});
-		const profile = await service.upsert({
-			name: "Remote",
-			host: "remote",
-		});
-
-		await expect(service.connect(profile.id)).rejects.toThrow(
-			"unsupported in SSH: no compatible Cline CLI binary",
-		);
-		expect(invocations.some((invocation) => invocation.options.inputFile)).toBe(
-			false,
-		);
-	});
-
-	it("keeps the active tunnel alive when a replacement connection fails", async () => {
-		const tunnels: FakeTunnel[] = [];
-		let nextPort = 41_000;
+	it("keeps the active connection when a replacement Hub connection fails", async () => {
 		const service = createService({
 			runProcess: async (_executable, args) => {
 				const destination = args.at(-2);
@@ -806,7 +843,7 @@ describe("RemoteEnvironmentService", () => {
 				if (command.includes("uname -s")) {
 					return inspection("Linux", "aarch64", "/home/dev");
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (command.includes("python3") && command.includes("-c")) {
 					return destination === "host-b"
 						? { stdout: "", stderr: "bootstrap failed", exitCode: 1 }
 						: success(
@@ -818,21 +855,17 @@ describe("RemoteEnvironmentService", () => {
 			resolveHelperBinary: async () => "/opt/cline/helper",
 			fileReadable: async () => true,
 			hashFile: async () => "0123456789abcdef",
-			reservePort: async () => nextPort++,
-			spawnTunnel: () => {
-				const tunnel = new FakeTunnel();
-				tunnels.push(tunnel);
-				return tunnel;
-			},
-			waitForTunnel: async () => undefined,
+			verifyHubConnection: async () => true,
 		});
 		const hostA = await service.upsert({
 			name: "Host A",
 			host: "host-a",
+			hubUrls: PROFILE_HUB_URLS,
 		});
 		const hostB = await service.upsert({
 			name: "Host B",
 			host: "host-b",
+			hubUrls: PROFILE_HUB_URLS,
 		});
 
 		const firstConnection = await service.connect(hostA.id);
@@ -840,12 +873,9 @@ describe("RemoteEnvironmentService", () => {
 
 		expect(service.getActive()).toEqual(firstConnection);
 		expect(service.getConnection(hostA.id)).toEqual(firstConnection);
-		expect(tunnels[0]?.killed).toBe(false);
 	});
 
-	it("keeps the previous tunnel until the runtime switch commits", async () => {
-		const tunnels: FakeTunnel[] = [];
-		let nextPort = 42_000;
+	it("keeps the previous connection until the runtime switch commits", async () => {
 		const requestHubShutdown = vi.fn(async () => true);
 		const service = createService({
 			runProcess: async (_executable, args) => {
@@ -854,7 +884,7 @@ describe("RemoteEnvironmentService", () => {
 				if (command.includes("uname -s")) {
 					return inspection("Linux", "aarch64", `/home/${destination}`);
 				}
-				if (command.includes("'hub' 'ensure'")) {
+				if (command.includes("python3") && command.includes("-c")) {
 					return success(
 						`{"url":"ws://127.0.0.1:25463/hub","authToken":"${destination}-token"}\n`,
 					);
@@ -864,17 +894,19 @@ describe("RemoteEnvironmentService", () => {
 			resolveHelperBinary: async () => "/opt/cline/helper",
 			fileReadable: async () => true,
 			hashFile: async () => "0123456789abcdef",
-			reservePort: async () => nextPort++,
-			spawnTunnel: () => {
-				const tunnel = new FakeTunnel();
-				tunnels.push(tunnel);
-				return tunnel;
-			},
-			waitForTunnel: async () => undefined,
+			verifyHubConnection: async () => true,
 			requestHubShutdown,
 		});
-		const hostA = await service.upsert({ name: "Host A", host: "host-a" });
-		const hostB = await service.upsert({ name: "Host B", host: "host-b" });
+		const hostA = await service.upsert({
+			name: "Host A",
+			host: "host-a",
+			hubUrls: ["ws://host-a:25463/hub"],
+		});
+		const hostB = await service.upsert({
+			name: "Host B",
+			host: "host-b",
+			hubUrls: ["ws://host-b:25463/hub"],
+		});
 
 		const connectionA = await service.connect(hostA.id);
 		const connectionB = await service.connect(hostB.id);
@@ -882,7 +914,7 @@ describe("RemoteEnvironmentService", () => {
 		expect(service.getActive()).toEqual(connectionB);
 		expect(service.getConnection(hostA.id)).toEqual(connectionA);
 		expect(service.getConnection(hostB.id)).toEqual(connectionB);
-		expect(tunnels[0]?.killed).toBe(false);
+		// Switching hosts keeps the other Hub and session running.
 		expect(requestHubShutdown).not.toHaveBeenCalled();
 
 		expect(service.activateConnection(hostA.id)).toBe(true);
@@ -892,61 +924,29 @@ describe("RemoteEnvironmentService", () => {
 		expect(service.activateConnection(hostB.id)).toBe(true);
 
 		expect(await service.disconnect(hostA.id)).toBe(true);
-		expect(tunnels[0]?.killed).toBe(true);
-		expect(tunnels[1]?.killed).toBe(false);
 		expect(service.getConnection(hostB.id)).toEqual(connectionB);
 		expect(service.getActive()).toEqual(connectionB);
 	});
 
-	it("reports tunnel loss separately from ordinary connection errors", async () => {
-		const tunnel = new FakeTunnel();
-		const onConnectionLost = vi.fn();
-		const requestHubShutdown = vi.fn(async () => true);
-		const service = new RemoteEnvironmentService({
-			profilesPath,
-			onConnectionLost,
-			dependencies: {
-				now: () => new Date("2026-08-06T12:00:00.000Z"),
-				randomId: () => "lost-profile",
-				runProcess: async (_executable, args) => {
-					const command = args.at(-1) ?? "";
-					if (command.includes("uname -s")) {
-						return inspection("Linux", "x86_64", "/home/dev");
-					}
-					if (command.includes("'hub' 'ensure'")) {
-						return success(
-							'{"url":"ws://127.0.0.1:25463/hub","authToken":"token"}\n',
-						);
-					}
-					return success();
-				},
-				resolveHelperBinary: async () => "/opt/cline/helper",
-				fileReadable: async () => true,
-				hashFile: async () => "0123456789abcdef",
-				reservePort: async () => 41_000,
-				spawnTunnel: () => tunnel,
-				waitForTunnel: async () => undefined,
-				requestHubShutdown,
-			},
-		});
-		const profile = await service.upsert({
-			name: "Remote",
-			host: "remote",
-		});
-		await service.connect(profile.id);
-
-		tunnel.emit("exit", 255, null);
-
-		expect(service.getActive()).toBeUndefined();
-		expect(onConnectionLost).toHaveBeenCalledWith(
-			expect.objectContaining({
-				profileId: profile.id,
-				state: "error",
+	it("resolves hubUrls in priority order and ignores empty or duplicate entries", () => {
+		expect(
+			resolveRemoteHubUrls({
+				hubUrls: [
+					" ws://100.101.163.69:25463/hub ",
+					"",
+					"ws://100.101.163.69:25463/hub",
+					"wss://hub.example.com/hub",
+				],
 			}),
-		);
-		// Cleanup uses a fresh SSH connection, never the failed local tunnel.
-		await service.dispose();
-		expect(requestHubShutdown).not.toHaveBeenCalled();
+		).toEqual(["ws://100.101.163.69:25463/hub", "wss://hub.example.com/hub"]);
+		// The legacy single hubUrl still works and comes after hubUrls.
+		expect(
+			resolveRemoteHubUrls({
+				hubUrls: ["ws://tailscale:25463/hub"],
+				hubUrl: "ws://legacy:25463/hub",
+			}),
+		).toEqual(["ws://tailscale:25463/hub", "ws://legacy:25463/hub"]);
+		expect(resolveRemoteHubUrls({})).toEqual([]);
 	});
 
 	it("quotes command arguments and rejects non-zero remote commands", async () => {

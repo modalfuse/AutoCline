@@ -30,7 +30,6 @@ export interface PortableReasoningWire {
  * them.
  */
 const VERBATIM_REASONING_ADAPTERS = new Set<AiSdkProviderOptionsTarget>([
-	"cline",
 	"openai",
 	"openai-compatible",
 ]);

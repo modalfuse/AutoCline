@@ -14,8 +14,6 @@ import { exportHistorySession } from "../session/history-export";
 import { deleteSession } from "../session/session";
 import {
 	loadClineAccountSnapshot,
-	loadIndividualSubscriptionPlans,
-	onProviderChange,
 	switchClineAccount,
 } from "../tui/cline-account";
 import type {
@@ -31,11 +29,6 @@ import { disableOpenTuiGraphicsProbe } from "../tui/opentui-env";
 import type { QueuedPromptItem, TuiStartupTarget } from "../tui/types";
 import { type ChatCommandState, chatCommandHost } from "../utils/chat-commands";
 import { applyCliCompactionMode } from "../utils/compaction-mode";
-import {
-	shouldZeroClineFreeModelCost,
-	zeroCliAgentEventCost,
-	zeroCliUsageCost,
-} from "../utils/free-model-cost";
 import {
 	prepareTerminalForPostTuiOutput,
 	writeErr,
@@ -117,10 +110,6 @@ export async function applyInteractiveModelChange(input: {
 }): Promise<void> {
 	const { config, providerSettingsManager, sessionRuntime } = input;
 	await sessionRuntime.ensureReady();
-	await onProviderChange({
-		config,
-		providerId: config.providerId,
-	});
 	const existing = providerSettingsManager.getProviderSettings(
 		config.providerId,
 	) ?? {
@@ -281,7 +270,6 @@ export async function runInteractive(
 		askQuestionRef: tuiAskQuestion,
 	});
 	const providerSettingsManager = new ProviderSettingsManager();
-	let zeroCurrentTurnCost = false;
 
 	const sessionRuntime = createInteractiveSessionRuntime({
 		config,
@@ -295,7 +283,7 @@ export async function runInteractive(
 		resolveMistakeLimitDecision,
 		switchToActModeTool,
 		onAgentEvent: (event) => {
-			uiEvents.emit("agent", zeroCliAgentEventCost(event, zeroCurrentTurnCost));
+			uiEvents.emit("agent", event);
 		},
 		onTeamEvent: (event) => {
 			uiEvents.emit("team", event);
@@ -549,13 +537,7 @@ export async function runInteractive(
 				config,
 				clineApiBaseUrl: options?.clineApiBaseUrl,
 			}),
-		loadIndividualSubscriptionPlans: async () =>
-			await loadIndividualSubscriptionPlans({
-				config,
-				clineApiBaseUrl: options?.clineApiBaseUrl,
-				clineProviderSettings: options?.clineProviderSettings,
-			}),
-		switchClineAccount: async (organizationId) =>
+			switchClineAccount: async (organizationId) =>
 			await switchClineAccount({
 				config,
 				organizationId,
@@ -583,7 +565,6 @@ export async function runInteractive(
 		},
 		onSubmit: async (input, mode, delivery, attachments, onCommandOutput) => {
 			let commandOutput: string | undefined;
-			let zeroTurnCost = false;
 			try {
 				await sessionRuntime.ensureReady();
 				await waitForSubmittedMode(mode);
@@ -611,8 +592,6 @@ export async function runInteractive(
 
 				input = chatCommandResult.input;
 				commandOutput = chatCommandResult.commandOutput;
-				zeroTurnCost = await shouldZeroClineFreeModelCost(config);
-				zeroCurrentTurnCost = zeroTurnCost;
 				const {
 					prompt: userInput,
 					userImages,
@@ -679,9 +658,8 @@ export async function runInteractive(
 				}
 				if (result.finishReason !== "completed") {
 					if (result.finishReason === "aborted" || isAbortInProgress()) {
-						const usage = zeroCliUsageCost(
-							await sessionRuntime.getAccumulatedUsage(result.usage),
-							zeroTurnCost,
+						const usage = await sessionRuntime.getAccumulatedUsage(
+							result.usage,
 						);
 						return {
 							usage,
@@ -696,9 +674,8 @@ export async function runInteractive(
 						errorText || `Turn finished with ${result.finishReason}`,
 					);
 				}
-				const usage = zeroCliUsageCost(
-					await sessionRuntime.getAccumulatedUsage(result.usage),
-					zeroTurnCost,
+				const usage = await sessionRuntime.getAccumulatedUsage(
+					result.usage,
 				);
 				return {
 					usage,
@@ -723,8 +700,7 @@ export async function runInteractive(
 				});
 				throw error;
 			} finally {
-				zeroCurrentTurnCost = false;
-				if (!delivery) {
+					if (!delivery) {
 					isRunning = false;
 					clearAbortInProgress();
 					refreshInteractiveSessionPoliciesIfPending();

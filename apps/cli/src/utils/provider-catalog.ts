@@ -6,7 +6,5 @@ import {
 export async function listLocalProviders(
 	manager: ProviderSettingsManager,
 ): ReturnType<typeof internalListLocalProviders> {
-	return await internalListLocalProviders(manager, {
-		isClinePassEnabled: true,
-	});
+	return await internalListLocalProviders(manager);
 }

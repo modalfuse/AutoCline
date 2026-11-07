@@ -1,7 +1,7 @@
 {
 	"$schema": "https://schema.tauri.app/config/2",
-	"productName": "Cline Nightly",
-	"identifier": "bot.cline.app.nightly",
+	"productName": "AutoCline Nightly",
+	"identifier": "bot.autocline.app.nightly",
 	"bundle": {
 		"linux": {
 			"deb": {

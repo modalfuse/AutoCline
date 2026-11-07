@@ -1,5 +1,6 @@
 import { resolveClineBuildEnv } from "@cline/shared";
 import { resolveHubEndpointOptions } from "../discovery/defaults";
+import { resolveHubListenConfig } from "../discovery/hub-config";
 import {
 	resolveProductionHubOwnerContext,
 	resolveSharedHubOwnerContext,
@@ -45,9 +46,19 @@ export async function startHubServer(
 		port: options.port,
 		pathname: options.pathname,
 	});
+	// Resolve from `~/.config/cline/hub.json` when the caller did not pass a
+	// list, so an in-process Hub binds the same addresses as a daemon does.
+	const listenHosts =
+		options.listenHosts && options.listenHosts.length > 0
+			? options.listenHosts
+			: resolveHubListenConfig({
+					defaultPort: endpoint.port,
+					defaultPathname: endpoint.pathname,
+				}).hosts;
 	return await startHubWebSocketServer({
 		...options,
 		...endpoint,
+		listenHosts,
 		owner: resolveDefaultHubOwnerContext(),
 	});
 }
@@ -66,9 +77,17 @@ export async function ensureHubServer(
 		port: options.port,
 		pathname: options.pathname,
 	});
+	const listenHosts =
+		options.listenHosts && options.listenHosts.length > 0
+			? options.listenHosts
+			: resolveHubListenConfig({
+					defaultPort: endpoint.port,
+					defaultPathname: endpoint.pathname,
+				}).hosts;
 	return await ensureHubWebSocketServer({
 		...options,
 		...endpoint,
+		listenHosts,
 		allowPortFallback:
 			options.allowPortFallback ??
 			shouldAllowDefaultPortFallback(hasExplicitPort),

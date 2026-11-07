@@ -123,9 +123,7 @@ export async function sendProviderCatalog(
 	peer: BrowserPeer,
 ): Promise<void> {
 	await ensureCustomProvidersLoaded(providerSettingsManager);
-	const payload = await listLocalProviders(providerSettingsManager, {
-		isClinePassEnabled: true,
-	});
+	const payload = await listLocalProviders(providerSettingsManager);
 	ctx.send(peer, {
 		type: "provider_catalog",
 		providers: payload.providers,

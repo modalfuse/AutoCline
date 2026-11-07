@@ -1,7 +1,10 @@
 import type { ITelemetryService } from "@cline/shared";
 import {
+	createCredentialsFromSettings,
 	getProviderAuthHandler,
 	getProviderOAuthCredentialsFromSettings,
+	type ProviderAuthHandler,
+	type ProviderOAuthCredentials,
 	saveProviderOAuthCredentials,
 } from "../../auth/provider-auth-registry";
 import { hashSecret, sdkDebug } from "../../logging/early-logger";
@@ -54,6 +57,9 @@ export class RuntimeOAuthTokenManager {
 		previous: ProviderSettings,
 		next: ProviderSettings,
 	) => void;
+	private readonly resolveAuthHandler?: (
+		providerId: string,
+	) => ProviderAuthHandler | undefined;
 	private readonly refreshInFlight = new Map<
 		ManagedOAuthProviderId,
 		Promise<RuntimeOAuthResolution | null>
@@ -66,33 +72,100 @@ export class RuntimeOAuthTokenManager {
 			previous: ProviderSettings,
 			next: ProviderSettings,
 		) => void;
+		/**
+		 * Optional explicit auth handler resolver. Cloud account callers inject a
+		 * handler (e.g. `createClineAccountAuthHandler()`) that is not part of the
+		 * local provider auth registry. When omitted, the local registry lookup is
+		 * used unchanged.
+		 */
+		resolveAuthHandler?: (
+			providerId: string,
+		) => ProviderAuthHandler | undefined;
 	}) {
 		this.providerSettingsManager =
 			options?.providerSettingsManager ?? new ProviderSettingsManager();
 		this.telemetry = options?.telemetry;
 		this.onCredentialsRefreshed = options?.onCredentialsRefreshed;
+		this.resolveAuthHandler = options?.resolveAuthHandler;
+	}
+
+	private getAuthHandler(
+		providerId: string,
+	): ProviderAuthHandler | undefined {
+		// Every credential read/normalize/refresh/save path in this manager must
+		// go through this single lookup so an injected handler is never mixed with
+		// registry-based credential helpers.
+		return this.resolveAuthHandler
+			? this.resolveAuthHandler(providerId)
+			: getProviderAuthHandler(providerId);
+	}
+
+	/**
+	 * Reads persisted credentials using the SAME handler selection used for
+	 * refresh/save. Injected handlers cannot rely on the registry helper (which
+	 * would silently re-resolve a different handler), so we build credentials
+	 * directly from the handler's normalize callback.
+	 */
+	private readCredentialsFromSettings(
+		handler: ProviderAuthHandler,
+		settings: ProviderSettings,
+	): ProviderOAuthCredentials | null {
+		if (!this.resolveAuthHandler) {
+			return getProviderOAuthCredentialsFromSettings(
+				handler.providerId,
+				settings,
+			);
+		}
+		return createCredentialsFromSettings(settings, {
+			normalizeAccessToken: handler.normalizeStoredAccessToken,
+		});
+	}
+
+	private saveCredentialsForHandler(input: {
+		handler: ProviderAuthHandler;
+		settings?: ProviderSettings;
+		credentials: ProviderOAuthCredentials;
+		setLastUsed: boolean;
+		save: boolean;
+	}): ProviderSettings {
+		if (!this.resolveAuthHandler) {
+			return saveProviderOAuthCredentials({
+				manager: this.providerSettingsManager,
+				providerId: input.handler.providerId,
+				settings: input.settings,
+				credentials: input.credentials,
+				setLastUsed: input.setLastUsed,
+				save: input.save,
+			});
+		}
+		return input.handler.saveCredentials({
+			manager: this.providerSettingsManager,
+			settings: input.settings,
+			credentials: input.credentials,
+			setLastUsed: input.setLastUsed,
+			save: input.save,
+		});
 	}
 
 	public async resolveProviderApiKey(input: {
 		providerId: string;
 		forceRefresh?: boolean;
 	}): Promise<RuntimeOAuthResolution | null> {
-		const handler = getProviderAuthHandler(input.providerId);
+		const handler = this.getAuthHandler(input.providerId);
 		if (!handler) {
 			return null;
 		}
 		return this.resolveWithSingleFlight(
-			handler.providerId,
-			handler.storageProviderId,
+			handler,
 			input.forceRefresh,
 		);
 	}
 
 	private async resolveWithSingleFlight(
-		providerId: ManagedOAuthProviderId,
-		storageProviderId: ManagedOAuthProviderId,
+		handler: ProviderAuthHandler,
 		forceRefresh = false,
 	): Promise<RuntimeOAuthResolution | null> {
+		const storageProviderId = handler.storageProviderId;
 		const currentInFlight = this.refreshInFlight.get(storageProviderId);
 		if (currentInFlight) {
 			return currentInFlight;
@@ -101,7 +174,7 @@ export class RuntimeOAuthTokenManager {
 			this.providerSettingsManager.getProviderSettings(storageProviderId);
 		if (
 			!initialSettings ||
-			!getProviderOAuthCredentialsFromSettings(providerId, initialSettings)
+			!this.readCredentialsFromSettings(handler, initialSettings)
 		) {
 			return null;
 		}
@@ -111,8 +184,7 @@ export class RuntimeOAuthTokenManager {
 			storageProviderId,
 			() =>
 				this.resolveProviderApiKeyInternal(
-					providerId,
-					storageProviderId,
+					handler,
 					// Another holder may already have rotated the token while we
 					// waited. Read disk under the lock and reuse that fresh token.
 					forceRefresh &&
@@ -131,14 +203,11 @@ export class RuntimeOAuthTokenManager {
 	}
 
 	private async resolveProviderApiKeyInternal(
-		providerId: ManagedOAuthProviderId,
-		storageProviderId: ManagedOAuthProviderId,
+		handler: ProviderAuthHandler,
 		forceRefresh: boolean,
 	): Promise<RuntimeOAuthResolution | null> {
-		const handler = getProviderAuthHandler(providerId);
-		if (!handler) {
-			return null;
-		}
+		const providerId: ManagedOAuthProviderId = handler.providerId;
+		const storageProviderId = handler.storageProviderId;
 		const settings =
 			this.providerSettingsManager.getProviderSettings(storageProviderId);
 		if (!settings) {
@@ -148,8 +217,8 @@ export class RuntimeOAuthTokenManager {
 			return null;
 		}
 
-		const currentCredentials = getProviderOAuthCredentialsFromSettings(
-			providerId,
+		const currentCredentials = this.readCredentialsFromSettings(
+			handler,
 			settings,
 		);
 		if (!currentCredentials) {
@@ -183,9 +252,8 @@ export class RuntimeOAuthTokenManager {
 			throw new OAuthReauthRequiredError(providerId);
 		}
 
-		const nextSettings: ProviderSettings = saveProviderOAuthCredentials({
-			manager: this.providerSettingsManager,
-			providerId,
+		const nextSettings: ProviderSettings = this.saveCredentialsForHandler({
+			handler,
 			settings: { ...settings, ...latestSettings },
 			credentials: nextCredentials,
 			setLastUsed: false,

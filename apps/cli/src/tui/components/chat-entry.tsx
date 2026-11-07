@@ -1,22 +1,7 @@
-import {
-	type ClineSubscriptionPlan,
-	extractClineFreeModelLimitResetTime,
-} from "@cline/core";
 import { useTerminalDimensions } from "@opentui/react";
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import "opentui-spinner/react";
-import {
-	getClineOrgIndividualInferenceSubscriptionMessage,
-	getClinePassLimitDetailMessage,
-	getCliSubscriptionUrl,
-	getIndividualPlanFeatures,
-	isClineFreeModelLimitErrorMessage,
-	isClineFreePromotionEndedErrorMessage,
-	isClineOrgIndividualInferenceSubscriptionErrorMessage,
-	isClinePassLimitErrorMessage,
-	isClinePassSubscriptionError,
-} from "../../utils/cline-pass-errors";
 import {
 	CLINE_CREDITS_DASHBOARD_URL,
 	isClineAccountCreditsErrorMessage,
@@ -272,12 +257,11 @@ function ToolCallView(props: {
 	);
 }
 
-function ClineCreditsClinePassErrorView(props: {
+function ClineCreditsErrorView(props: {
 	defaultFg?: string;
 	theme: ResolvedTheme;
 }) {
 	const linkColor = props.theme.accents.act;
-	const subscriptionUrl = getCliSubscriptionUrl();
 	return (
 		<box flexDirection="row">
 			<text fg="red" content="* " />
@@ -292,9 +276,7 @@ function ClineCreditsClinePassErrorView(props: {
 				<text
 					fg={props.defaultFg}
 					selectable
-					content={
-						"You have run out of Cline credits. Add credits in the dashboard or purchase and switch to ClinePass to continue."
-					}
+					content="You have run out of Cline credits. Add credits in the dashboard to continue."
 				/>
 				<box flexDirection="row">
 					<text fg="gray">Purchase Credits: </text>
@@ -304,131 +286,6 @@ function ClineCreditsClinePassErrorView(props: {
 						</a>
 					</text>
 				</box>
-				<box flexDirection="row">
-					<text fg="gray">Purchase ClinePass: </text>
-					<text fg={linkColor} selectable>
-						<a href={subscriptionUrl}>{subscriptionUrl}</a>
-					</text>
-				</box>
-				<box flexDirection="row">
-					<text fg="gray">Switch to ClinePass: </text>
-					<text fg="gray">
-						type /settings in CLI and switch provider to ClinePass
-					</text>
-				</box>
-			</box>
-		</box>
-	);
-}
-
-function ClineCreditsErrorView(props: {
-	defaultFg?: string;
-	theme: ResolvedTheme;
-}) {
-	return (
-		<ClineCreditsClinePassErrorView
-			defaultFg={props.defaultFg}
-			theme={props.theme}
-		/>
-	);
-}
-
-function ClinePassSubscriptionErrorView(props: {
-	defaultFg?: string;
-	loadIndividualSubscriptionPlans?: () => Promise<ClineSubscriptionPlan[]>;
-	theme: ResolvedTheme;
-}) {
-	const subscriptionUrl = getCliSubscriptionUrl();
-	const [planFeatures, setPlanFeatures] = useState<string[]>([]);
-	const planAccent = props.theme.accents.plan;
-
-	useEffect(() => {
-		if (!props.loadIndividualSubscriptionPlans) {
-			return;
-		}
-		let isMounted = true;
-		void props
-			.loadIndividualSubscriptionPlans()
-			.then((plans) => {
-				if (isMounted) {
-					setPlanFeatures(getIndividualPlanFeatures(plans));
-				}
-			})
-			.catch(() => {
-				// Keep the subscription error view usable if plan metadata is unavailable.
-			});
-
-		return () => {
-			isMounted = false;
-		};
-	}, [props.loadIndividualSubscriptionPlans]);
-
-	return (
-		<box flexDirection="row">
-			<text fg={planAccent} content="* " />
-			<box
-				flexDirection="column"
-				border
-				borderStyle="rounded"
-				borderColor={planAccent}
-				paddingX={1}
-			>
-				<text fg={planAccent}>ClinePass subscription required</text>
-				<text
-					fg={props.defaultFg}
-					selectable
-					content="No access to ClinePass subscription models yet. Subscribe to ClinePass, the low cost open weights model coding plan."
-				/>
-				{planFeatures.length > 0 && (
-					<box flexDirection="column" marginTop={1}>
-						<text fg={props.defaultFg}>ClinePass includes:</text>
-						{planFeatures.map((feature) => (
-							<text key={feature} fg={props.defaultFg} selectable>
-								<span fg="green">✓ </span>
-								<span>{feature}</span>
-							</text>
-						))}
-					</box>
-				)}
-				<box flexDirection="row">
-					<text fg="gray">Subscribe: </text>
-					<text fg={props.theme.accents.act} selectable>
-						<a href={subscriptionUrl}>Open subscription page</a>
-					</text>
-				</box>
-				<box flexDirection="row">
-					<text fg="gray">URL: </text>
-					<text fg={props.theme.accents.act} selectable>
-						<a href={subscriptionUrl}>{subscriptionUrl}</a>
-					</text>
-				</box>
-			</box>
-		</box>
-	);
-}
-
-function ClineOrgIndividualInferenceSubscriptionErrorView(props: {
-	defaultFg?: string;
-	theme: ResolvedTheme;
-}) {
-	const planAccent = props.theme.accents.plan;
-
-	return (
-		<box flexDirection="row">
-			<text fg={planAccent} content="* " />
-			<box
-				flexDirection="column"
-				border
-				borderStyle="rounded"
-				borderColor={planAccent}
-				paddingX={1}
-			>
-				<text fg={planAccent}>Personal ClinePass required</text>
-				<text
-					fg={props.defaultFg}
-					selectable
-					content={getClineOrgIndividualInferenceSubscriptionMessage()}
-				/>
 			</box>
 		</box>
 	);
@@ -466,126 +323,11 @@ function CompactionDividerRow(props: {
 	);
 }
 
-function ClinePassLimitErrorView(props: {
-	message: string;
-	defaultFg?: string;
-	theme: ResolvedTheme;
-}) {
-	const detail = getClinePassLimitDetailMessage(props.message) ?? props.message;
-	const accent = props.theme.accents.act;
-
-	return (
-		<box flexDirection="row">
-			<text fg={accent} content="* " />
-			<box
-				flexDirection="column"
-				border
-				borderStyle="rounded"
-				borderColor={accent}
-				paddingX={1}
-			>
-				<text fg={props.theme.accents.error}>ClinePass limit reached</text>
-				<text fg={props.defaultFg} selectable content={detail} />
-				<text
-					fg={props.defaultFg}
-					selectable
-					content="Switch to Cline usage-based billing and retry with the Cline provider."
-				/>
-				<box flexDirection="row">
-					<text fg="gray">Headless CLI: </text>
-					<text fg={props.defaultFg} selectable content="rerun with " />
-					<code
-						content="--provider cline"
-						filetype="bash"
-						syntaxStyle={getSyntaxStyle(props.theme)}
-						selectable
-					/>
-					<text fg={props.defaultFg} selectable content="." />
-				</box>
-			</box>
-		</box>
-	);
-}
-
-function ClineFreeModelLimitErrorView(props: {
-	message: string;
-	defaultFg?: string;
-	theme: ResolvedTheme;
-}) {
-	const resetTime = extractClineFreeModelLimitResetTime(props.message);
-	const accent = props.theme.accents.act;
-
-	return (
-		<box flexDirection="row">
-			<text fg={accent} content="* " />
-			<box
-				flexDirection="column"
-				border
-				borderStyle="rounded"
-				borderColor={accent}
-				paddingX={1}
-			>
-				<text fg={props.theme.accents.error}>
-					Daily free model limit reached
-				</text>
-				<text
-					fg={props.defaultFg}
-					selectable
-					content="You've reached today's free usage limit for this model."
-				/>
-				<text
-					fg={props.defaultFg}
-					selectable
-					content={
-						resetTime
-							? `Try again in ${resetTime} or select another model.`
-							: "Try again later or select another model."
-					}
-				/>
-				<text fg="gray">Open the model selector with /model.</text>
-			</box>
-		</box>
-	);
-}
-
-function ClineFreePromotionEndedErrorView(props: {
-	defaultFg?: string;
-	theme: ResolvedTheme;
-}) {
-	const accent = props.theme.accents.act;
-	return (
-		<box flexDirection="row">
-			<text fg={accent} content="* " />
-			<box
-				flexDirection="column"
-				border
-				borderStyle="rounded"
-				borderColor={accent}
-				paddingX={1}
-			>
-				<text fg={props.theme.accents.error}>Free model promotion ended</text>
-				<text
-					fg={props.defaultFg}
-					selectable
-					content="The free promotion for this model has ended and it is no longer available."
-				/>
-				<text
-					fg={props.defaultFg}
-					selectable
-					content="Select another model to continue."
-				/>
-				<text fg="gray">Open the model selector with /model.</text>
-			</box>
-		</box>
-	);
-}
-
 export function ChatEntryView(props: {
 	entry: ChatEntry;
 	accent?: string;
 	/** Mode the entry was produced in (resolved with the current-mode fallback). */
 	mode?: SyntaxAccentMode;
-	loadIndividualSubscriptionPlans?: () => Promise<ClineSubscriptionPlan[]>;
 	theme: ResolvedTheme;
 }) {
 	const { entry, mode = "act", theme } = props;
@@ -709,51 +451,6 @@ export function ChatEntryView(props: {
 		case "error":
 			if (isClineAccountCreditsErrorMessage(entry.text)) {
 				return <ClineCreditsErrorView defaultFg={defaultFg} theme={theme} />;
-			}
-			if (isClineOrgIndividualInferenceSubscriptionErrorMessage(entry.text)) {
-				return (
-					<ClineOrgIndividualInferenceSubscriptionErrorView
-						defaultFg={defaultFg}
-						theme={theme}
-					/>
-				);
-			}
-			if (isClinePassSubscriptionError(entry.text)) {
-				return (
-					<ClinePassSubscriptionErrorView
-						defaultFg={defaultFg}
-						loadIndividualSubscriptionPlans={
-							props.loadIndividualSubscriptionPlans
-						}
-						theme={theme}
-					/>
-				);
-			}
-			if (isClinePassLimitErrorMessage(entry.text)) {
-				return (
-					<ClinePassLimitErrorView
-						message={entry.text}
-						defaultFg={defaultFg}
-						theme={theme}
-					/>
-				);
-			}
-			if (isClineFreeModelLimitErrorMessage(entry.text)) {
-				return (
-					<ClineFreeModelLimitErrorView
-						defaultFg={defaultFg}
-						message={entry.text}
-						theme={theme}
-					/>
-				);
-			}
-			if (isClineFreePromotionEndedErrorMessage(entry.text)) {
-				return (
-					<ClineFreePromotionEndedErrorView
-						defaultFg={defaultFg}
-						theme={theme}
-					/>
-				);
 			}
 			return (
 				<box flexDirection="row">

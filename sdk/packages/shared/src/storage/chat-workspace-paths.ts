@@ -5,7 +5,15 @@ export const CLINE_CHAT_WORKSPACE_DIRECTORY_NAME = "chat";
 // derives the real location from resolveClineDataDir(), which defaults to
 // `~/.cline/data`.
 const CLINE_CONFIG_DIRECTORY_NAME = ".cline";
+// AutoCline keeps its own state beside the official app's root; both are
+// app-internal, so the chat workspace under either must not be offered as a
+// user project.
+const AUTOCLINE_CONFIG_DIRECTORY_NAME = ".autocline";
 const CLINE_DATA_DIRECTORY_NAME = "data";
+const CLINE_CONFIG_DIRECTORY_NAMES: readonly string[] = [
+	CLINE_CONFIG_DIRECTORY_NAME,
+	AUTOCLINE_CONFIG_DIRECTORY_NAME,
+];
 
 /**
  * Browser-safe structural check for the shared chat workspace that hosts
@@ -30,7 +38,7 @@ export function isChatWorkspacePath(path: string): boolean {
 	const dataDirectory = segments.at(-3) ?? "";
 	const configDirectory = segments.at(-4) ?? "";
 	return (
-		configDirectory === CLINE_CONFIG_DIRECTORY_NAME &&
+		CLINE_CONFIG_DIRECTORY_NAMES.includes(configDirectory) &&
 		dataDirectory === CLINE_DATA_DIRECTORY_NAME &&
 		workspacesDirectory === CLINE_WORKSPACES_DIRECTORY_NAME &&
 		chatDirectory === CLINE_CHAT_WORKSPACE_DIRECTORY_NAME

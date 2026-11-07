@@ -16,7 +16,6 @@ import ViewHeader from "../common/ViewHeader"
 import VSCodeButtonLink from "../common/VSCodeButtonLink"
 import { updateSetting } from "../settings/utils/settingsHandlers"
 import { AccountWelcomeView } from "./AccountWelcomeView"
-import { ClinePassCard } from "./ClinePassCard"
 import { CreditBalance } from "./CreditBalance"
 import CreditsHistoryTable from "./CreditsHistoryTable"
 import { convertProtoUsageTransactions, getClineUris, getMainRole } from "./helpers"
@@ -238,8 +237,6 @@ const ClineAccountView = ({ clineUser, userOrganizations, activeOrganization, cl
 					isLoading={isLoading || !!accountSwitch}
 					lastFetchTime={lastFetchTime}
 				/>
-
-				<ClinePassCard />
 
 				<VSCodeDivider className="mt-6 mb-3 w-full" />
 

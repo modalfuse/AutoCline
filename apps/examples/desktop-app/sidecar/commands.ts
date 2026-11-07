@@ -37,6 +37,7 @@ import {
 	type ClineAccountUser,
 	clearAccountTelemetryIdentity,
 	createConfiguredStreamingTranscriptionSession,
+	clearPrivateModelsCatalogCache,
 	createHubProvidersApi,
 	createUserInstructionConfigService,
 	executeClineAccountAction,
@@ -183,6 +184,7 @@ import {
 import { getPullRequestStatus } from "./pull-request";
 import { capturePullRequestEvent } from "./pull-request-telemetry";
 import { resolveDesktopRemoteHelper } from "./remote-helper";
+import { hubConnectError, resolveHubUrlList } from "./remote-hub-connect";
 import {
 	getSessionChanges,
 	localGit,
@@ -818,6 +820,7 @@ async function listSessionsFromSidecarManager(
 			});
 		}
 	}
+
 	return Array.from(byId.values())
 		.sort((left, right) => {
 			const leftTime = Date.parse(
@@ -2054,90 +2057,188 @@ export async function handleCommand(
 		}
 		return await withRemoteEnvironmentTransition(ctx, async () => {
 			const service = getRemoteEnvironmentService(ctx);
+			// AutoCline connects to a Hub only at the profile's configured URLs
+			// (t848u): there is no SSH tunnel and no per-session localhost
+			// forward, so a profile without hubUrls is refused up front with a
+			// message that says what to add instead of failing deep in the SDK.
+			const targetProfile = (await service.list()).find(
+				(item) => item.id === id,
+			);
+			if (targetProfile && resolveHubUrlList(targetProfile).length === 0) {
+				throw hubConnectError(targetProfile, []);
+			}
 			const previousEnvironmentId = ctx.activeEnvironmentId;
 			const previousServiceProfileId = service.getActive()?.profileId;
 			const previousRuntimeProfileId =
 				ctx.runtimeBindings.get(previousEnvironmentId)?.kind === "ssh"
 					? previousEnvironmentId
 					: undefined;
-			const targetWasConnected = Boolean(service.getConnection(id));
-			let connection: RemoteEnvironmentConnection | undefined;
-			let runtimeCommitted = false;
 
-			try {
-				connection = await service.connect(id);
-				await connectRemoteSessionRuntime(ctx, connection);
-				runtimeCommitted = true;
-				const currentConnection = service.getConnection(id);
-				if (
-					!currentConnection ||
-					currentConnection.endpoint !== connection.endpoint
-				) {
-					throw new Error(
-						`Remote environment ${id} disconnected during initialization.`,
-					);
+			// Already connected: reuse instantly (no SSH).
+			const existingConnection = service.getConnection(id);
+			if (existingConnection) {
+				if (!ctx.runtimeBindings.get(id)) {
+					await connectRemoteSessionRuntime(ctx, existingConnection);
+				} else {
+					service.activateConnection(id);
+					ctx.activeEnvironmentId = id;
 				}
-			} catch (error) {
-				if (runtimeCommitted && previousEnvironmentId !== id) {
-					await disconnectRemoteSessionRuntime(ctx, id);
-				}
-				if (!targetWasConnected && service.getConnection(id)) {
-					await service.disconnect(id).catch((disconnectError) => {
-						ctx.logger?.log("Failed to roll back SSH connection", {
-							error: disconnectError,
-							environmentId: id,
-							severity: "warn",
-						});
-					});
-				}
-				const rollbackProfileId =
-					previousRuntimeProfileId &&
-					service.getConnection(previousRuntimeProfileId)
-						? previousRuntimeProfileId
-						: previousServiceProfileId;
-				if (rollbackProfileId) {
-					service.activateConnection(rollbackProfileId);
-				}
-				ctx.activeEnvironmentId = ctx.runtimeBindings.has(previousEnvironmentId)
-					? previousEnvironmentId
-					: LOCAL_ENVIRONMENT_ID;
-				throw error;
+				const result = {
+					profile: existingConnection.profile,
+					status: "connected" as const,
+					environmentId: id,
+					activeEnvironmentId: id,
+					activeProfileId: id,
+					workspaceRoot: existingConnection.workspaceRoot,
+					homeDir: existingConnection.homeDir,
+					remotePlatform: existingConnection.platform,
+					remoteArch: existingConnection.arch,
+				};
+				broadcastEvent(ctx, "remote_environment_changed", result);
+				return result;
 			}
 
-			if (!connection) {
-				throw new Error(`Remote environment ${id} failed to connect.`);
-			}
+			const cached = await service.peekSharedHubCredential(id);
+			const statusHome = service
+				.getStatuses()
+				.find((item) => item.profileId === id)?.remoteHome;
+			const optimisticHome =
+				cached?.home?.trim() ||
+				statusHome?.trim() ||
+				"";
+			const optimisticWorkspace =
+				optimisticHome ||
+				(typeof targetProfile?.name === "string" ? "" : "");
 
-			const previousProfileIds = new Set(
-				[previousRuntimeProfileId, previousServiceProfileId].filter(
-					(profileId): profileId is string =>
-						Boolean(profileId) && profileId !== id,
-				),
-			);
-			for (const previousProfileId of previousProfileIds) {
-				await disconnectRemoteSessionRuntime(ctx, previousProfileId);
-				await service.disconnect(previousProfileId).catch((disconnectError) => {
-					ctx.logger?.log("Failed to clean up previous SSH connection", {
-						error: disconnectError,
-						environmentId: previousProfileId,
-						severity: "warn",
-					});
-				});
-			}
-
-			const result = {
-				profile: connection.profile,
-				status: "connected" as const,
+			// Optimistic activate: UI can paint cached sessions immediately.
+			ctx.activeEnvironmentId = id;
+			const connectingResult = {
+				profile: targetProfile ?? {
+					id,
+					name: id,
+					host: id,
+					createdAt: new Date().toISOString(),
+					updatedAt: new Date().toISOString(),
+				},
+				status: "connecting" as const,
 				environmentId: id,
 				activeEnvironmentId: id,
 				activeProfileId: id,
-				workspaceRoot: connection.workspaceRoot,
-				homeDir: connection.homeDir,
-				remotePlatform: connection.platform,
-				remoteArch: connection.arch,
+				workspaceRoot: optimisticWorkspace || optimisticHome || "/",
+				homeDir: optimisticHome || "/",
+				remotePlatform: cached?.platform,
+				remoteArch: cached?.arch,
 			};
-			broadcastEvent(ctx, "remote_environment_changed", result);
-			return result;
+			broadcastEvent(ctx, "remote_environment_changed", connectingResult);
+
+			const waitUntilConnected = args?.waitUntilConnected === true;
+			const background = (async () => {
+				let connection: RemoteEnvironmentConnection | undefined;
+				let runtimeCommitted = false;
+				try {
+					connection = await service.connect(id);
+					await connectRemoteSessionRuntime(ctx, connection);
+					runtimeCommitted = true;
+					const currentConnection = service.getConnection(id);
+					if (
+						!currentConnection ||
+						currentConnection.endpoint !== connection.endpoint
+					) {
+						throw new Error(
+							`Remote environment ${id} disconnected during initialization.`,
+						);
+					}
+
+					const previousProfileIds = new Set(
+						[previousRuntimeProfileId, previousServiceProfileId].filter(
+							(profileId): profileId is string =>
+								Boolean(profileId) && profileId !== id,
+						),
+					);
+					for (const previousProfileId of previousProfileIds) {
+						await disconnectRemoteSessionRuntime(ctx, previousProfileId);
+						await service
+							.disconnect(previousProfileId)
+							.catch((disconnectError) => {
+								ctx.logger?.log(
+									"Failed to clean up previous SSH connection",
+									{
+										error: disconnectError,
+										environmentId: previousProfileId,
+										severity: "warn",
+									},
+								);
+							});
+					}
+
+					const result = {
+						profile: connection.profile,
+						status: "connected" as const,
+						environmentId: id,
+						activeEnvironmentId: id,
+						activeProfileId: id,
+						workspaceRoot: connection.workspaceRoot,
+						homeDir: connection.homeDir,
+						remotePlatform: connection.platform,
+						remoteArch: connection.arch,
+					};
+					broadcastEvent(ctx, "remote_environment_changed", result);
+					return result;
+				} catch (error) {
+					if (runtimeCommitted && previousEnvironmentId !== id) {
+						await disconnectRemoteSessionRuntime(ctx, id);
+					}
+					if (service.getConnection(id)) {
+						await service.disconnect(id).catch((disconnectError) => {
+							ctx.logger?.log("Failed to roll back SSH connection", {
+								error: disconnectError,
+								environmentId: id,
+								severity: "warn",
+							});
+						});
+					}
+					const rollbackProfileId =
+						previousRuntimeProfileId &&
+						service.getConnection(previousRuntimeProfileId)
+							? previousRuntimeProfileId
+							: previousServiceProfileId;
+					if (rollbackProfileId) {
+						service.activateConnection(rollbackProfileId);
+					}
+					if (ctx.activeEnvironmentId === id) {
+						ctx.activeEnvironmentId = ctx.runtimeBindings.has(
+							previousEnvironmentId,
+						)
+							? previousEnvironmentId
+							: LOCAL_ENVIRONMENT_ID;
+					}
+					broadcastEvent(ctx, "remote_environment_changed", {
+						status: "error",
+						environmentId: id,
+						activeEnvironmentId: ctx.activeEnvironmentId,
+						activeProfileId:
+							ctx.activeEnvironmentId === LOCAL_ENVIRONMENT_ID
+								? null
+								: ctx.activeEnvironmentId,
+						message:
+							error instanceof Error ? error.message : String(error),
+					});
+					throw error;
+				}
+			})();
+
+			if (waitUntilConnected) {
+				return await background;
+			}
+
+			void background.catch((error) => {
+				ctx.logger?.log("Background remote connect failed", {
+					error,
+					environmentId: id,
+					severity: "warn",
+				});
+			});
+			return connectingResult;
 		});
 	}
 	if (command === "disconnect_remote_environment") {
@@ -3105,7 +3206,15 @@ export async function handleCommand(
 	// ── Provider management ────────────────────────────────────────────
 	if (command === "list_provider_catalog") {
 		const providers = createHubProvidersApi(await ensureSharedHubClient(ctx));
-		return await providers.list({ isClinePassEnabled: true });
+		// AutoCline: hide Cline Usage-Billing + ClinePass from Settings and composer.
+		const catalog = await providers.list();
+		const hidden = new Set(["cline", "cline-pass"]);
+		return {
+			...catalog,
+			providers: (catalog.providers ?? []).filter(
+				(provider: { id?: string }) => !hidden.has(String(provider.id ?? "")),
+			),
+		};
 	}
 	if (command === "list_transcription_models") {
 		const manager = new ProviderSettingsManager();
@@ -3116,15 +3225,16 @@ export async function handleCommand(
 		);
 	}
 	if (command === "list_provider_models") {
+		const providerId = String(args?.provider ?? "").trim();
+		// AutoCline: LiteLLM labels/route list change with the home router — never
+		// serve a stale private catalog that still has Vendor- prefixes / duplicates.
+		if (providerId === "litellm") {
+			clearPrivateModelsCatalogCache();
+		}
 		const providers = createHubProvidersApi(await ensureSharedHubClient(ctx));
 		return await providers.listModels({
-			providerId: String(args?.provider ?? "").trim(),
+			providerId,
 		});
-	}
-	if (command === "list_cline_recommended_models") {
-		return await createHubProvidersApi(
-			await ensureSharedHubClient(ctx),
-		).recommendedModels();
 	}
 	if (command === "create_streaming_transcription_session") {
 		const manager = new ProviderSettingsManager();

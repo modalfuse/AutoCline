@@ -1,4 +1,3 @@
-import { isClineProvider } from "@cline/shared";
 import { OLLAMA_DEFAULT_CONTEXT_WINDOW } from "../builtins";
 import {
 	getModelReasoningControls,
@@ -7,12 +6,10 @@ import {
 	isGlmModel,
 	isKimiK26Family as isKimiK26FamilyFact,
 	isMiniMaxM3Model,
-	isMoonshotKimiModelIdFallback,
 	providerReasoningRouteMatches,
 	resolveModelFamily,
 } from "../model-facts";
 import { isOfficialAnthropicEndpoint } from "../url";
-import { buildGatewayReasoningOptions } from "./anthropic-compatible";
 import { buildOpenAINativeProviderOptions } from "./generic-compatible";
 import {
 	buildNativeGlmThinkingProviderOptionsPatch,
@@ -35,10 +32,6 @@ import {
 
 function isKimiK26Family(input: ProviderOptionMatchInput): boolean {
 	return isKimiK26FamilyFact(input.context);
-}
-
-function isMoonshotKimiModel(input: ProviderOptionMatchInput): boolean {
-	return isMoonshotKimiModelIdFallback(input.request);
 }
 
 function isDeepSeekModelOrProviderDefault(
@@ -153,10 +146,9 @@ const routedAnthropicProviderFallbackRule: ProviderOptionRule = {
 	id: "provider.routed-anthropic.fallbacks",
 	phase: "provider",
 	description:
-		"OpenRouter and Cline enable provider failover for Anthropic models.",
+		"OpenRouter enables provider failover for Anthropic models.",
 	applies: (input) =>
-		(input.request.providerId === "openrouter" ||
-			isClineProvider(input.request.providerId)) &&
+		input.request.providerId === "openrouter" &&
 		isAnthropicCompatibleModel({
 			modelId: input.request.modelId,
 			family: resolveModelFamily(input.context),
@@ -229,18 +221,6 @@ const genericProviderFanoutRule: ProviderOptionRule = {
 				}),
 };
 
-const clineGatewayReasoningRule: ProviderOptionRule = {
-	id: "provider.cline.reasoning",
-	phase: "provider-reasoning",
-	description: "Cline gateway accepts the shared gateway reasoning shape.",
-	applies: (input) => isClineProvider(input.request.providerId),
-	build: (input) =>
-		buildReasoningPatchForProvider(
-			input,
-			buildGatewayReasoningOptions(input.request, input.context),
-		),
-};
-
 const openRouterReasoningRule: ProviderOptionRule = {
 	id: "provider.openrouter.reasoning",
 	phase: "provider-reasoning",
@@ -253,17 +233,6 @@ const openRouterReasoningRule: ProviderOptionRule = {
 			input,
 			buildOpenRouterReasoningOptions(input.request, input.context),
 		),
-};
-
-const clineMiniMaxM3GatewayReasoningRule: ProviderOptionRule = {
-	id: "provider.cline.minimax-m3.gateway-reasoning",
-	phase: "provider-reasoning",
-	description:
-		"Cline-routed MiniMax M3 keeps the gateway reasoning shape instead of leaking generic thinking.",
-	applies: (input) =>
-		isClineProvider(input.request.providerId) && isMiniMaxM3(input),
-	suppresses: { genericThinking: true },
-	build: () => undefined,
 };
 
 const vercelReasoningRule: ProviderOptionRule = {
@@ -391,24 +360,6 @@ const geminiThinkingRule: ProviderOptionRule = {
 			},
 		};
 	},
-};
-
-const clineReasoningDisabledThinkingRule: ProviderOptionRule = {
-	id: "provider.cline.disable-thinking",
-	phase: "provider",
-	description:
-		"Cline-routed non-Kimi-K2.6 Moonshot Kimi models use thinking.type=disabled when reasoning is disabled.",
-	applies: (input) =>
-		isClineProvider(input.request.providerId) &&
-		isMoonshotKimiModel(input) &&
-		input.request.reasoning?.enabled === false &&
-		!isKimiK26Family(input),
-	build: (input) =>
-		buildThinkingPatch({
-			providerId: input.request.providerId,
-			providerOptionsKey: input.providerOptionsKey,
-			thinkingType: "disabled",
-		}),
 };
 
 const kimiK26ThinkingRule: ProviderOptionRule = {
@@ -549,14 +500,11 @@ export const PROVIDER_OPTION_RULES: ReadonlyArray<ProviderOptionRule> = [
 	openAiAdapterRule,
 	openAiCodexRule,
 	genericProviderFanoutRule,
-	clineGatewayReasoningRule,
 	openRouterReasoningRule,
-	clineMiniMaxM3GatewayReasoningRule,
 	vercelReasoningRule,
 	directMoonshotReasoningRule,
 	fireworksReasoningRule,
 	geminiThinkingRule,
-	clineReasoningDisabledThinkingRule,
 	kimiK26ThinkingRule,
 	deepSeekThinkingRule,
 	ollamaNativeOptionsRule,

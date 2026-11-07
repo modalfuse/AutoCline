@@ -13,7 +13,6 @@ export function buildTeammateSystemPrompt(
 	return buildClineSystemPrompt({
 		ide: config.clineIdeName?.trim() || "Terminal",
 		workspaceRoot: config.cwd?.trim() || "/",
-		providerId: config.providerId,
 		rules: `# Team Teammate Role\n${trimmedPrompt}`,
 		platform: config.clinePlatform,
 		metadata: config.workspaceMetadata,
@@ -33,7 +32,6 @@ export function buildSubAgentSystemPrompt(
 	return buildClineSystemPrompt({
 		ide: config.clineIdeName || "Terminal",
 		workspaceRoot: config.cwd?.trim() || "/",
-		providerId: config.providerId,
 		overridePrompt: trimmedPrompt,
 		metadata: config.workspaceMetadata,
 		platform: config.clinePlatform,
